@@ -1,0 +1,18 @@
+[project]
+name = "dart-fss-extractor"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "dart-fss>=0.4.14",
+    "dotenv>=0.9.9",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+# src 디렉터리 하위의 모든 패키지를 자동으로 찾도록 설정
+where = ["src"]
