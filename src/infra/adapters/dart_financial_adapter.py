@@ -2,7 +2,7 @@
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from typing import Optional
 import requests
@@ -135,6 +135,29 @@ class DartFinancialAdapter(FinancialStatementPort):
             # 기업명 추출 (첫 번째 항목에서)
             corp_name = items[0].get("corp_name", "")
 
+            # 날짜 파싱 (첫 번째 항목에서)
+            start_date = None
+            end_date = None
+            is_cumulative = False
+            
+            if items:
+                thstrm_dt = items[0].get("thstrm_dt", "")
+                if thstrm_dt:
+                    try:
+                        # "2023.01.01 ~ 2023.09.30" 형식 파싱
+                        dates = thstrm_dt.split("~")
+                        if len(dates) == 2:
+                            start_str = dates[0].strip()
+                            end_str = dates[1].strip()
+                            start_date = datetime.strptime(start_str, "%Y.%m.%d").date()
+                            end_date = datetime.strptime(end_str, "%Y.%m.%d").date()
+                            
+                            # 누적 여부 판단 (시작일이 1월 1일인지 확인)
+                            if start_date.month == 1 and start_date.day == 1:
+                                is_cumulative = True
+                    except ValueError:
+                        print(f"[WARNING] Date parsing failed: {thstrm_dt}")
+
             return FinancialStatement(
                 corp_code=corp_code,
                 corp_name=corp_name,
@@ -142,7 +165,10 @@ class DartFinancialAdapter(FinancialStatementPort):
                 reprt_type=report_type,
                 fs_type=fs_type,
                 accounts=accounts,
-                extracted_at=datetime.now()
+                extracted_at=datetime.now(),
+                start_date=start_date,
+                end_date=end_date,
+                is_cumulative=is_cumulative
             )
 
         except (requests.RequestException, json.JSONDecodeError, KeyError):
@@ -191,7 +217,10 @@ class DartFinancialAdapter(FinancialStatementPort):
                 {"account_nm": acc.account_nm, "thstrm_amount": acc.thstrm_amount}
                 for acc in statement.accounts
             ],
-            "extracted_at": statement.extracted_at.isoformat()
+            "extracted_at": statement.extracted_at.isoformat(),
+            "start_date": statement.start_date.isoformat() if statement.start_date else None,
+            "end_date": statement.end_date.isoformat() if statement.end_date else None,
+            "is_cumulative": statement.is_cumulative
         }
 
         with cache_path.open("w", encoding="utf-8") as f:
@@ -224,6 +253,10 @@ class DartFinancialAdapter(FinancialStatementPort):
                 for item in data["accounts"]
             ]
 
+            start_date = date.fromisoformat(data["start_date"]) if data.get("start_date") else None
+            end_date = date.fromisoformat(data["end_date"]) if data.get("end_date") else None
+            is_cumulative = data.get("is_cumulative", False)
+
             return FinancialStatement(
                 corp_code=data["corp_code"],
                 corp_name=data["corp_name"],
@@ -231,7 +264,10 @@ class DartFinancialAdapter(FinancialStatementPort):
                 reprt_type=ReportType(data["reprt_type"]),
                 fs_type=FinancialStatementType(data["fs_type"]),
                 accounts=accounts,
-                extracted_at=datetime.fromisoformat(data["extracted_at"])
+                extracted_at=datetime.fromisoformat(data["extracted_at"]),
+                start_date=start_date,
+                end_date=end_date,
+                is_cumulative=is_cumulative
             )
         except (json.JSONDecodeError, KeyError, ValueError):
             return None
