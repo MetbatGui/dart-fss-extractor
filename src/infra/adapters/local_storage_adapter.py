@@ -40,5 +40,22 @@ class LocalStorageAdapter(StoragePort):
 
         # ExcelWriter를 사용하여 다중 시트 저장
         with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+            # 각 시트에 DataFrame 저장 (인덱스 제외)
             for sheet_name, df in dataframes.items():
-                df.to_excel(writer, sheet_name=sheet_name, index=True)
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+            # ----- bestfit 적용 시작 -----
+            workbook = writer.book
+            for sheet_name in writer.sheets:
+                worksheet = writer.sheets[sheet_name]
+                for column_cells in worksheet.iter_cols():
+                    max_length = max(
+                        len(str(cell.value)) if cell.value is not None else 0
+                        for cell in column_cells
+                    )
+                    # 약간 여유를 두어 열 너비 설정
+                    adjusted_width = max_length + 2
+                    column_letter = column_cells[0].column_letter
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+            # ----- bestfit 적용 끝 -----
+            writer.save()
