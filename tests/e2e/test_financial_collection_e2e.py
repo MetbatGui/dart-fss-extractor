@@ -99,23 +99,21 @@ def test_financial_collection_e2e(setup_services, tmp_path):
     for sheet in expected_sheets:
         assert sheet in xls.sheet_names, f"시트 '{sheet}'가 누락되었습니다."
         
-        df = pd.read_excel(xls, sheet_name=sheet)
+        df = pd.read_excel(xls, sheet_name=sheet, index_col="기업명")
         assert not df.empty, f"시트 '{sheet}'의 데이터가 비어있습니다."
         
-        # 필수 컬럼 확인
-        expected_cols = ["기업명", "연도", "1Q", "2Q", "3Q", "4Q"]
-        # 연간 시트는 '값' 컬럼을 가질 수도 있고 구조에 따라 다를 수 있음. 
-        # FinancialCollectionService 구현상 연간 시트도 1Q~4Q 합산이 아니라 별도 로직일 수 있으나
-        # 현재 구현은 _append_to_results에서 연간 데이터도 '값' 컬럼 하나로 저장함.
-        # 따라서 분기 시트와 연간 시트의 컬럼 검증을 분리해야 함.
+        # Wide Format 검증: 인덱스가 기업명이어야 함
+        assert "삼성전자" in df.index, f"시트 '{sheet}'에 '삼성전자' 행이 없습니다."
+        assert "SK하이닉스" in df.index, f"시트 '{sheet}'에 'SK하이닉스' 행이 없습니다."
         
+        # 컬럼 검증 (기간)
         if "분기" in sheet:
-            for col in expected_cols:
-                assert col in df.columns, f"시트 '{sheet}'에 컬럼 '{col}'이 누락되었습니다."
+            # 예: 2023.1Q, 2023.2Q ...
+            expected_col = "2023.1Q"
+            assert expected_col in df.columns, f"시트 '{sheet}'에 컬럼 '{expected_col}'이 누락되었습니다."
         else:
-            # 연간 시트: 기업명, 연도, 값
-            assert "기업명" in df.columns
-            assert "연도" in df.columns
-            assert "값" in df.columns
+            # 예: 2023
+            expected_col = 2023
+            assert expected_col in df.columns, f"시트 '{sheet}'에 컬럼 '{expected_col}'이 누락되었습니다."
 
     print("\n[E2E] 테스트 성공: 모든 시트와 데이터가 정상적으로 생성되었습니다.")
