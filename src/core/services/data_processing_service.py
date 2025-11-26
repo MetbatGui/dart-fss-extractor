@@ -4,8 +4,8 @@ from decimal import Decimal, InvalidOperation
 from typing import List, Optional, Dict
 from datetime import date
 
-from src.core.domain.models.financial_statement import AccountItem, FinancialStatement
-from src.core.domain.models.performance_metrics import FinancialMetrics, QuarterlyMetrics
+from core.domain.models.financial_statement import AccountItem, FinancialStatement
+from core.domain.models.performance_metrics import FinancialMetrics, QuarterlyMetrics
 
 
 class DataProcessingService:
@@ -71,11 +71,21 @@ class DataProcessingService:
             # 계산 불가 시 None
             q4_final = FinancialMetrics(None, None, None)
 
+        # 기업명 추출 (가능한 보고서에서)
+        corp_name = ""
+        for stmt in [q1_stmt, semi_stmt, q3_stmt, annual_stmt]:
+            if stmt and stmt.corp_name:
+                corp_name = stmt.corp_name
+                break
+
         return QuarterlyMetrics(
-            q1=q1_final,
-            q2=q2_final,
-            q3=q3_final,
-            q4=q4_final
+            corp_name=corp_name,
+            metrics_by_quarter={
+                "1Q": q1_final,
+                "2Q": q2_final,
+                "3Q": q3_final,
+                "4Q": q4_final
+            }
         )
 
     def _get_cumulative_q3(
