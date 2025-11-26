@@ -10,8 +10,29 @@ from infra.adapters.dart_financial_adapter import DartFinancialAdapter
 from infra.adapters.corp_code_adapter import CorpCodeAdapter
 from infra.adapters.local_storage_adapter import LocalStorageAdapter
 
+import sys
+import logging
+from dotenv import load_dotenv
+
 # .env 파일 로드 (API 키 설정을 위해)
 load_dotenv()
+
+@pytest.fixture(autouse=True)
+def setup_logging():
+    """E2E 테스트를 위한 로깅 설정"""
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # 기존 핸들러 제거 (중복 방지)
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+        
+    # Stdout 핸들러 추가
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    root_logger.addHandler(handler)
+
 
 @pytest.fixture
 def setup_services():
@@ -39,12 +60,11 @@ def test_financial_collection_e2e(setup_services, tmp_path):
     """
     service = setup_services
     
-    # 1. 기업 목록 로드
-    base_path = Path(__file__).parent.parent / "fixtures" / "data" / "target_companies.csv"
-    if not base_path.exists():
-        pytest.skip("테스트 데이터 파일이 없습니다.")
-        
-    df_companies = pd.read_csv(base_path)
+    # 1. 기업 목록 로드 (테스트용 더미 데이터 생성)
+    data = {"기업명": ["삼성전자", "SK하이닉스"]}
+    df_companies = pd.DataFrame(data)
+    
+    # 테스트를 위해 임시 파일로 저장했다가 읽는 척 하거나, 그냥 바로 리스트로 변환
     company_names = df_companies['기업명'].tolist()
     
     # 2. 수집 실행 (2023년)
