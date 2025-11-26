@@ -1,6 +1,6 @@
 # Agent Instructions
 
-- **Language Preference**: The user has requested to always use Korean for all conversations and thought processes.
+- **Language Preference**: The user has requested to always use Korean for all conversations, thought processes, and artifacts.
 
 ## Commit Convention
 
