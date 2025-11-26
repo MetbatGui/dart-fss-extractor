@@ -115,7 +115,7 @@ class FinancialCollectionService:
         df_quarter = df_base[df_base["구분"] == "분기"].copy()
         if not df_quarter.empty:
             # 컬럼 생성: "2023.1Q"
-            df_quarter["기간"] = df_quarter["연도"].astype(str) + "." + df_quarter["분기"]
+            df_quarter["기간"] = df_quarter["연도"].astype(int).astype(str) + "." + df_quarter["분기"].astype(str)
             
             # Pivot: 행=기업명, 열=기간, 값=매출액/영업이익/당기순이익
             final_dfs["매출액_분기"] = df_quarter.pivot(index="기업명", columns="기간", values="매출액")
