@@ -64,9 +64,15 @@ def test_get_code_single(adapter: CorpCodeAdapter) -> None:
     """
     company_names = _read_company_names(CSV_PATH)
     assert company_names, "CSV 파일에서 기업명을 읽어올 수 없습니다."
-    single_name = company_names[0]
-    code = adapter.get_code(single_name)
-    assert code is None or isinstance(code, str)
+
+    # Act
+    codes = adapter.get_codes(company_names)
+
+    # Assert
+    assert len(codes) == len(company_names), "반환된 코드 리스트 길이가 입력과 다릅니다."
+    for code in codes:
+        assert code is None or isinstance(code, str), "코드가 문자열이거나 None이어야 합니다."
+
 
 def test_force_download() -> None:
     """XML 파일이 없을 때 강제 다운로드가 동작하는지 확인.
@@ -77,28 +83,37 @@ def test_force_download() -> None:
     """
     import shutil
     import tempfile
+    import zipfile
+    import io
+    from unittest.mock import patch, MagicMock
+
     temp_root = Path(tempfile.mkdtemp())
-    os.environ["ROOT_DIR"] = str(temp_root)
-    # 기존 캐시 디렉터리 삭제 (if exists)
-    cache_dir = temp_root / "tests" / "fixtures" / "test_data"
-    # Ensure adapter forces download
-    adapter = CorpCodeAdapter(force_download=True)
-    # Verify XML exists
-    xml_path = Path(__file__).resolve().parent.parent.parent / "tests" / "fixtures" / "test_data" / "stock_list.csv"
-    # The adapter stores XML in its internal cache; we check that the file exists
-    assert adapter._XML_PATH.is_file()
+    
+    # Mock environment and requests
+    with patch.dict(os.environ, {"ROOT_DIR": str(temp_root), "DART_API_KEY": "dummy_key"}), \
+         patch("requests.get") as mock_get:
+        
+        # Create a dummy zip file containing a dummy XML
+        dummy_xml = b"<result><list><corp_code>12345678</corp_code><corp_name>Test Corp</corp_name><stock_code>123456</stock_code><modify_date>20230101</modify_date></list></result>"
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("CORPCODE.xml", dummy_xml)
+        
+        mock_response = MagicMock()
+        mock_response.content = zip_buffer.getvalue()
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        # Ensure adapter forces download
+        adapter = CorpCodeAdapter(force_download=True)
+        
+        # Verify XML exists
+        assert adapter._XML_PATH.is_file()
+        
+        # Verify content
+        with open(adapter._XML_PATH, "rb") as f:
+            content = f.read()
+            assert b"Test Corp" in content
+
     # Cleanup
     shutil.rmtree(temp_root)
-
-    """AAA 패턴을 사용한 `get_codes` 동작 검증."""
-    # Arrange
-    company_names = _read_company_names(CSV_PATH)
-    assert company_names, "CSV 파일에서 기업명을 읽어올 수 없습니다."
-
-    # Act
-    codes = adapter.get_codes(company_names)
-
-    # Assert
-    assert len(codes) == len(company_names), "반환된 코드 리스트 길이가 입력과 다릅니다."
-    for code in codes:
-        assert code is None or isinstance(code, str), "코드가 문자열이거나 None이어야 합니다."
