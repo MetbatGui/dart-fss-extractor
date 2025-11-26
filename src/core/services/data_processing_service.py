@@ -1,8 +1,19 @@
 """데이터 처리 및 변환 서비스."""
 
+import sys
 from decimal import Decimal, InvalidOperation
 from typing import List, Optional, Dict
 from datetime import date
+from pathlib import Path
+
+# Python 3.11+ 사용 시 tomllib, 이하 버전은 tomli 사용
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        raise ImportError("Python 3.10 이하에서는 'tomli' 패키지가 필요합니다. pip install tomli")
 
 from core.domain.models.financial_statement import AccountItem, FinancialStatement
 from core.domain.models.performance_metrics import FinancialMetrics, QuarterlyMetrics
@@ -16,10 +27,35 @@ class DataProcessingService:
     - 기간 정보를 활용한 분기별 실적 계산
     """
 
-    # 계정과목 매핑 키워드 (우선순위 순)
-    REVENUE_KEYWORDS = ["매출액", "수익(매출액)", "영업수익", "매출"]
-    OP_PROFIT_KEYWORDS = ["영업이익", "영업이익(손실)"]
-    NET_INCOME_KEYWORDS = ["당기순이익", "당기순이익(손실)", "분기순이익", "분기순이익(손실)", "반기순이익", "반기순이익(손실)"]
+    def __init__(self, config_path: Optional[str] = None):
+        """초기화.
+        
+        Args:
+            config_path: 계정과목 키워드 설정 파일 경로 (TOML 형식).
+                        None이면 기본 경로 사용: config/account_keywords.toml
+        """
+        if config_path is None:
+            # 프로젝트 루트에서 config 디렉토리 찾기
+            current_file = Path(__file__)
+            project_root = current_file.parent.parent.parent.parent
+            config_path = project_root / "config" / "account_keywords.toml"
+        else:
+            config_path = Path(config_path)
+        
+        # TOML 설정 파일 로드
+        if config_path.exists():
+            with open(config_path, "rb") as f:
+                config = tomllib.load(f)
+            
+            keywords = config.get("account_keywords", {})
+            self.REVENUE_KEYWORDS = keywords.get("revenue", [])
+            self.OP_PROFIT_KEYWORDS = keywords.get("operating_profit", [])
+            self.NET_INCOME_KEYWORDS = keywords.get("net_income", [])
+        else:
+            # 설정 파일이 없으면 기본값 사용 (하위 호환성)
+            self.REVENUE_KEYWORDS = ["매출액", "수익(매출액)", "영업수익", "매출"]
+            self.OP_PROFIT_KEYWORDS = ["영업이익", "영업이익(손실)"]
+            self.NET_INCOME_KEYWORDS = ["당기순이익", "당기순이익(손실)", "분기순이익", "분기순이익(손실)", "반기순이익", "반기순이익(손실)"]
 
     def extract_metrics(self, statement: FinancialStatement) -> FinancialMetrics:
         """재무제표에서 주요 지표 추출."""

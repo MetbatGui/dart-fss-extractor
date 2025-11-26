@@ -41,6 +41,7 @@ def main():
     corp_code_adapter = CorpCodeAdapter()
     financial_adapter = DartFinancialAdapter(api_key=api_key, use_cache=True)
     storage_adapter = LocalStorageAdapter()
+    # DataProcessingService는 기본 설정 파일(config/account_keywords.toml) 사용
     processing_service = DataProcessingService()
 
     # 서비스 초기화

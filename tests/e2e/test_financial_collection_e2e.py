@@ -41,6 +41,7 @@ def setup_services():
     financial_adapter = DartFinancialAdapter(use_cache=True)
     corp_code_adapter = CorpCodeAdapter()
     storage_adapter = LocalStorageAdapter()
+    # DataProcessingService는 기본 설정 파일(config/account_keywords.toml) 사용
     processing_service = DataProcessingService()
 
     service = FinancialCollectionService(

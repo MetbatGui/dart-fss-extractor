@@ -11,6 +11,8 @@ from core.services.data_processing_service import DataProcessingService
 
 @pytest.fixture
 def service():
+    # config_path를 지정하지 않으면 기본 경로(config/account_keywords.toml) 사용
+    # 설정 파일이 없으면 하드코딩된 기본값 사용
     return DataProcessingService()
 
 
