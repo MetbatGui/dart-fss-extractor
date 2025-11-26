@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from src.infra.adapters.local_storage_adapter import LocalStorageAdapter
+from infra.adapters.local_storage_adapter import LocalStorageAdapter
 
 
 @pytest.fixture

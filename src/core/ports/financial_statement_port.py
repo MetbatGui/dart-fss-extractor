@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from src.core.domain.models.financial_statement import (
+from core.domain.models.financial_statement import (
     FinancialStatement,
     ReportType,
 )

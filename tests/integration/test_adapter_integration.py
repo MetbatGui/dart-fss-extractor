@@ -10,9 +10,9 @@ import csv
 from pathlib import Path
 import pytest
 
-from src.infra.adapters.corp_code_adapter import CorpCodeAdapter
-from src.infra.adapters.dart_financial_adapter import DartFinancialAdapter
-from src.core.domain.models.financial_statement import ReportType
+from infra.adapters.corp_code_adapter import CorpCodeAdapter
+from infra.adapters.dart_financial_adapter import DartFinancialAdapter
+from core.domain.models.financial_statement import ReportType
 
 
 @pytest.fixture

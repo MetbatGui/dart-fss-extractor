@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Mapping, Optional, Sequence, List
 import requests
 
-from src.core.ports.corp_code_port import CorpCodePort
+from core.ports.corp_code_port import CorpCodePort
 
 
 class CorpCodeAdapter(CorpCodePort):

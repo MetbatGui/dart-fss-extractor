@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Dict
 import pandas as pd
 
-from src.core.ports.storage_port import StoragePort
+from core.ports.storage_port import StoragePort
 
 
 class LocalStorageAdapter(StoragePort):

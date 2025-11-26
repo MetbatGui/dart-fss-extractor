@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Optional
 import requests
 
-from src.core.domain.models.financial_statement import (
+from core.domain.models.financial_statement import (
     AccountItem,
     FinancialStatement,
     FinancialStatementType,
     ReportType,
 )
-from src.core.ports.financial_statement_port import FinancialStatementPort
+from core.ports.financial_statement_port import FinancialStatementPort
 
 
 class DartFinancialAdapter(FinancialStatementPort):
