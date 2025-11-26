@@ -9,6 +9,9 @@ import os
 import csv
 from pathlib import Path
 import pytest
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from infra.adapters.corp_code_adapter import CorpCodeAdapter
 from infra.adapters.dart_financial_adapter import DartFinancialAdapter

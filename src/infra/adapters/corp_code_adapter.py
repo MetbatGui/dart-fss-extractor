@@ -39,9 +39,18 @@ class CorpCodeAdapter(CorpCodePort):
         """XML 데이터가 없으면 다운로드하고 압축을 푼다.
 
         다운로드는 환경 변수 ``DART_API_KEY`` 가 필요하다.
+        파일이 존재하더라도 크기가 너무 작으면(1KB 미만) 손상된 것으로 간주하고 재다운로드한다.
         """
         self._CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        if self._force_download or not self._XML_PATH.is_file():
+        
+        should_download = self._force_download
+        
+        if not self._XML_PATH.is_file():
+            should_download = True
+        elif self._XML_PATH.stat().st_size < 1024:  # 1KB 미만이면 손상 의심
+            should_download = True
+            
+        if should_download:
             self._download_and_extract()
 
     def _download_and_extract(self) -> None:
@@ -52,12 +61,22 @@ class CorpCodeAdapter(CorpCodePort):
         url = f"https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key={api_key}"
         response = requests.get(url, timeout=30)
         response.raise_for_status()
+        
+        # 응답 크기 검증 (너무 작으면 에러)
+        if len(response.content) < 1024:
+             raise ValueError(f"다운로드된 파일 크기가 너무 작습니다 ({len(response.content)} bytes). API 키나 요청을 확인하세요.")
+
         self._ZIP_PATH.write_bytes(response.content)
         with zipfile.ZipFile(self._ZIP_PATH, "r") as z:
             # zip 안에 CORPCODE.xml 이 하나만 존재한다.
             z.extractall(self._CACHE_DIR)
+        
         if not self._XML_PATH.is_file():
             raise FileNotFoundError("압축 해제 후 CORPCODE.xml 파일을 찾을 수 없습니다.")
+            
+        # 압축 해제 후 크기 재검증
+        if self._XML_PATH.stat().st_size < 1024:
+             raise ValueError(f"압축 해제된 XML 파일 크기가 너무 작습니다 ({self._XML_PATH.stat().st_size} bytes).")
 
     def _load_mapping(self) -> Mapping[str, str]:
         """XML 파일을 파싱해 ``{기업명: 기업코드}`` 사전을 만든다."""
