@@ -1,5 +1,6 @@
 """데이터 처리 및 변환 서비스."""
 
+import re
 import sys
 from decimal import Decimal, InvalidOperation
 from typing import List, Optional, Dict
@@ -171,20 +172,40 @@ class DataProcessingService:
             return None
         return a + b
 
+    def _normalize_account_name(self, name: str) -> str:
+        """계정과목명에서 괄호와 괄호 안 내용, 공백, 특수문자, 숫자, 영문 등을 제거하고 순수 한글만 반환.
+        
+        1️⃣ 괄호(`(`, `)`)와 그 안에 있는 모든 문자 제거 (예: "당기순이익(손실)" → "당기순이익")
+        2️⃣ 남은 문자열에서 한글이 아닌 모든 문자 제거
+        
+        Args:
+            name: 원본 계정과목명
+        
+        Returns:
+            한글만 남은 문자열
+        """
+        # 괄호와 괄호 안 내용 제거
+        without_parentheses = re.sub(r'\([^)]*\)', '', name)
+        # 한글 외 문자 모두 제거 (공백, 숫자, 특수문자, 영문 등)
+        return re.sub(r'[^가-힣]', '', without_parentheses)
+
+
     def _find_account_value(self, accounts: List[AccountItem], keywords: List[str]) -> Optional[Decimal]:
         """키워드 리스트와 일치하는 계정과목의 값을 찾아 반환."""
-        # 1. 정확한 매칭 시도
+        # 1. 정확한 매칭 시도 (한글만 추출하여 비교)
         for keyword in keywords:
+            key_normalized = self._normalize_account_name(keyword)
             for account in accounts:
-                acc_name = account.account_nm.replace(" ", "")
-                key_norm = keyword.replace(" ", "")
-                if acc_name == key_norm:
+                acc_normalized = self._normalize_account_name(account.account_nm)
+                if acc_normalized == key_normalized:
                     return self._parse_amount(account.thstrm_amount)
         
-        # 2. 부분 매칭 시도
+        # 2. 부분 매칭 시도 (한글만 추출하여 비교)
         for keyword in keywords:
+            key_normalized = self._normalize_account_name(keyword)
             for account in accounts:
-                if keyword in account.account_nm:
+                acc_normalized = self._normalize_account_name(account.account_nm)
+                if key_normalized in acc_normalized:
                     return self._parse_amount(account.thstrm_amount)
         return None
 
