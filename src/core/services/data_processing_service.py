@@ -274,16 +274,46 @@ class DataProcessingService:
 
 
     def _find_account_value(self, accounts: List[AccountItem], keywords: List[str]) -> Optional[Decimal]:
-        """키워드 리스트와 일치하는 계정과목의 값을 찾아 반환."""
-        # 1. 정확한 매칭 시도 (한글만 추출하여 비교)
+        """키워드 리스트와 일치하는 계정과목의 값을 찾아 반환.
+        
+        정확한 매칭을 먼저 시도하고, 없으면 부분 매칭을 시도합니다.
+        """
+        # 1. 정확한 매칭 시도
+        result = self._find_exact_match(accounts, keywords)
+        if result is not None:
+            return result
+        
+        # 2. 부분 매칭 시도
+        return self._find_partial_match(accounts, keywords)
+
+    def _find_exact_match(self, accounts: List[AccountItem], keywords: List[str]) -> Optional[Decimal]:
+        """정확한 계정과목명 매칭.
+        
+        Args:
+            accounts: 계정과목 리스트
+            keywords: 검색 키워드 리스트
+        
+        Returns:
+            매칭된 계정의 금액, 없으면 None
+        """
         for keyword in keywords:
             key_normalized = self._normalize_account_name(keyword)
             for account in accounts:
                 acc_normalized = self._normalize_account_name(account.account_nm)
                 if acc_normalized == key_normalized:
                     return self._parse_amount(account.thstrm_amount)
+        return None
+
+    def _find_partial_match(self, accounts: List[AccountItem], keywords: List[str]) -> Optional[Decimal]:
+        """부분 계정과목명 매칭.
         
-        # 2. 부분 매칭 시도 (한글만 추출하여 비교)
+        Args:
+            accounts: 계정과목 리스트
+            keywords: 검색 키워드 리스트
+        
+        Returns:
+            매칭된 계정의 금액, 없으면 None
+        """
         for keyword in keywords:
             key_normalized = self._normalize_account_name(keyword)
             for account in accounts:
