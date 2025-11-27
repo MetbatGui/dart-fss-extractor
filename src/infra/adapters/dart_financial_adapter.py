@@ -40,6 +40,7 @@ class DartFinancialAdapter(FinancialStatementPort):
         self._use_cache = use_cache
         self._CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+
     def get_financial_statement(
         self,
         corp_code: str,
@@ -47,48 +48,74 @@ class DartFinancialAdapter(FinancialStatementPort):
         report_type: ReportType,
         prefer_consolidated: bool = True
     ) -> Optional[FinancialStatement]:
-        """재무제표 조회."""
+        """재무제표 조회.
+        
+        캐시 확인 → API 조회 순서로 진행하며, 연결/개별 우선순위를 고려합니다.
+        """
         # 1. 캐시 확인
-        if self._use_cache:
-            # 우선순위에 따라 캐시 확인
-            if prefer_consolidated:
-                cached = self._load_from_cache(corp_code, year, report_type, FinancialStatementType.CONSOLIDATED)
-                if cached:
-                    return cached
-                cached = self._load_from_cache(corp_code, year, report_type, FinancialStatementType.SEPARATE)
-                if cached:
-                    return cached
-            else:
-                cached = self._load_from_cache(corp_code, year, report_type, FinancialStatementType.SEPARATE)
-                if cached:
-                    return cached
-                cached = self._load_from_cache(corp_code, year, report_type, FinancialStatementType.CONSOLIDATED)
-                if cached:
-                    return cached
+        statement = self._check_cache(corp_code, year, report_type, prefer_consolidated)
+        if statement:
+            return statement
+        
+        # 2. API 조회
+        return self._fetch_with_fallback(corp_code, year, report_type, prefer_consolidated)
 
-        # 2. API 호출 - 양방향 fallback
+    def _check_cache(
+        self,
+        corp_code: str,
+        year: int,
+        report_type: ReportType,
+        prefer_consolidated: bool
+    ) -> Optional[FinancialStatement]:
+        """캐시에서 재무제표 조회.
+        
+        우선순위에 따라 연결 → 개별 또는 개별 → 연결 순서로 확인합니다.
+        """
+        if not self._use_cache:
+            return None
+        
+        fs_types = self._get_fs_type_priority(prefer_consolidated)
+        
+        for fs_type in fs_types:
+            cached = self._load_from_cache(corp_code, year, report_type, fs_type)
+            if cached:
+                return cached
+        
+        return None
+
+    def _fetch_with_fallback(
+        self,
+        corp_code: str,
+        year: int,
+        report_type: ReportType,
+        prefer_consolidated: bool
+    ) -> Optional[FinancialStatement]:
+        """API 호출 (fallback 포함).
+        
+        우선순위에 따라 조회하고, 실패 시 대안으로 fallback합니다.
+        """
+        fs_types = self._get_fs_type_priority(prefer_consolidated)
+        
+        for fs_type in fs_types:
+            statement = self._fetch_from_api(corp_code, year, report_type, fs_type)
+            if statement:
+                self._save_to_cache(statement)
+                return statement
+        
+        return None
+    
+    def _get_fs_type_priority(self, prefer_consolidated: bool) -> list[FinancialStatementType]:
+        """재무제표 종류 우선순위 반환.
+        
+        Args:
+            prefer_consolidated: 연결재무제표 우선 여부
+        
+        Returns:
+            우선순위 리스트 ([연결, 개별] 또는 [개별, 연결])
+        """
         if prefer_consolidated:
-            # CFS 우선 → OFS fallback
-            statement = self._fetch_from_api(corp_code, year, report_type, FinancialStatementType.CONSOLIDATED)
-            if statement:
-                self._save_to_cache(statement)
-                return statement
-            
-            statement = self._fetch_from_api(corp_code, year, report_type, FinancialStatementType.SEPARATE)
-            if statement:
-                self._save_to_cache(statement)
-            return statement
-        else:
-            # OFS 우선 → CFS fallback
-            statement = self._fetch_from_api(corp_code, year, report_type, FinancialStatementType.SEPARATE)
-            if statement:
-                self._save_to_cache(statement)
-                return statement
-            
-            statement = self._fetch_from_api(corp_code, year, report_type, FinancialStatementType.CONSOLIDATED)
-            if statement:
-                self._save_to_cache(statement)
-            return statement
+            return [FinancialStatementType.CONSOLIDATED, FinancialStatementType.SEPARATE]
+        return [FinancialStatementType.SEPARATE, FinancialStatementType.CONSOLIDATED]
 
     def _fetch_from_api(
         self,
