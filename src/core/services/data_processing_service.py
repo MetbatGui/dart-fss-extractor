@@ -73,48 +73,17 @@ class DataProcessingService:
         q3_stmt: Optional[FinancialStatement],
         annual_stmt: Optional[FinancialStatement]
     ) -> QuarterlyMetrics:
-        """기간 정보를 활용하여 정확한 분기별 실적 계산."""
+        """기간 정보를 활용하여 정확한 분기별 실적 계산.
         
-        # 1. 각 보고서에서 지표 추출
-        q1_metrics = self.extract_metrics(q1_stmt) if q1_stmt else FinancialMetrics(None, None, None)
-        semi_metrics = self.extract_metrics(semi_stmt) if semi_stmt else FinancialMetrics(None, None, None)
-        q3_metrics = self.extract_metrics(q3_stmt) if q3_stmt else FinancialMetrics(None, None, None)
-        annual_metrics = self.extract_metrics(annual_stmt) if annual_stmt else FinancialMetrics(None, None, None)
-
-        # 2. 분기별 실적 계산
-        # Q1: 1분기 보고서 그대로 사용
-        q1_final = q1_metrics
-
-        # Q2: 반기(누적) - Q1
-        # 반기 보고서가 누적(1.1~6.30)이라고 가정 (대부분 그렇음)
-        # 만약 반기가 별도(4.1~6.30)라면 그대로 사용해야 함 (드문 케이스)
-        q2_final = self._calculate_diff(semi_metrics, q1_metrics) if semi_stmt and semi_stmt.is_cumulative else semi_metrics
-
-        # Q3: 3분기 보고서 확인
-        # 누적(1.1~9.30)이면 -> 3분기 누적 - 반기 누적
-        # 별도(7.1~9.30)이면 -> 그대로 사용
-        if q3_stmt and q3_stmt.is_cumulative:
-            q3_final = self._calculate_diff(q3_metrics, semi_metrics)
-        else:
-            q3_final = q3_metrics
-
-        # Q4: 연간(누적) - 3분기 누적
-        # 3분기 누적 값을 구해야 함
-        cumulative_q3 = self._get_cumulative_q3(q1_metrics, semi_metrics, q3_metrics, q3_stmt)
+        각 분기별 계산 로직을 헬퍼 메서드로 위임하여 복잡도를 낮춤.
+        """
+        q1_final = self._calculate_q1(q1_stmt)
+        q2_final = self._calculate_q2(q1_stmt, semi_stmt)
+        q3_final = self._calculate_q3(semi_stmt, q3_stmt)
+        q4_final = self._calculate_q4(q1_stmt, semi_stmt, q3_stmt, annual_stmt)
         
-        if annual_stmt and cumulative_q3:
-            q4_final = self._calculate_diff(annual_metrics, cumulative_q3)
-        else:
-            # 계산 불가 시 None
-            q4_final = FinancialMetrics(None, None, None)
-
-        # 기업명 추출 (가능한 보고서에서)
-        corp_name = ""
-        for stmt in [q1_stmt, semi_stmt, q3_stmt, annual_stmt]:
-            if stmt and stmt.corp_name:
-                corp_name = stmt.corp_name
-                break
-
+        corp_name = self._extract_corp_name([q1_stmt, semi_stmt, q3_stmt, annual_stmt])
+        
         return QuarterlyMetrics(
             corp_name=corp_name,
             metrics_by_quarter={
@@ -124,6 +93,120 @@ class DataProcessingService:
                 "4Q": q4_final
             }
         )
+
+    def _calculate_q1(self, q1_stmt: Optional[FinancialStatement]) -> FinancialMetrics:
+        """1분기 실적 계산 (그대로 사용).
+        
+        Args:
+            q1_stmt: 1분기 보고서
+        
+        Returns:
+            1분기 재무 지표
+        """
+        return self.extract_metrics(q1_stmt) if q1_stmt else FinancialMetrics(None, None, None)
+
+    def _calculate_q2(
+        self,
+        q1_stmt: Optional[FinancialStatement],
+        semi_stmt: Optional[FinancialStatement]
+    ) -> FinancialMetrics:
+        """2분기 실적 계산 (반기 누적 - 1분기).
+        
+        Args:
+            q1_stmt: 1분기 보고서
+            semi_stmt: 반기 보고서
+        
+        Returns:
+            2분기 재무 지표
+        """
+        if not semi_stmt:
+            return FinancialMetrics(None, None, None)
+        
+        semi_metrics = self.extract_metrics(semi_stmt)
+        
+        # 반기가 누적(1.1~6.30)이면 1분기를 빼야 함
+        if semi_stmt.is_cumulative and q1_stmt:
+            q1_metrics = self.extract_metrics(q1_stmt)
+            return self._calculate_diff(semi_metrics, q1_metrics)
+        
+        # 반기가 별도(4.1~6.30)면 그대로 사용
+        return semi_metrics
+
+    def _calculate_q3(
+        self,
+        semi_stmt: Optional[FinancialStatement],
+        q3_stmt: Optional[FinancialStatement]
+    ) -> FinancialMetrics:
+        """3분기 실적 계산.
+        
+        Args:
+            semi_stmt: 반기 보고서
+            q3_stmt: 3분기 보고서
+        
+        Returns:
+            3분기 재무 지표
+        """
+        if not q3_stmt:
+            return FinancialMetrics(None, None, None)
+        
+        q3_metrics = self.extract_metrics(q3_stmt)
+        
+        # 3분기가 누적(1.1~9.30)이면 반기를 빼야 함
+        if q3_stmt.is_cumulative and semi_stmt:
+            semi_metrics = self.extract_metrics(semi_stmt)
+            return self._calculate_diff(q3_metrics, semi_metrics)
+        
+        # 3분기가 별도(7.1~9.30)면 그대로 사용
+        return q3_metrics
+
+    def _calculate_q4(
+        self,
+        q1_stmt: Optional[FinancialStatement],
+        semi_stmt: Optional[FinancialStatement],
+        q3_stmt: Optional[FinancialStatement],
+        annual_stmt: Optional[FinancialStatement]
+    ) -> FinancialMetrics:
+        """4분기 실적 계산 (연간 누적 - 3분기 누적).
+        
+        Args:
+            q1_stmt: 1분기 보고서
+            semi_stmt: 반기 보고서
+            q3_stmt: 3분기 보고서
+            annual_stmt: 연간 보고서
+        
+        Returns:
+            4분기 재무 지표
+        """
+        if not annual_stmt:
+            return FinancialMetrics(None, None, None)
+        
+        annual_metrics = self.extract_metrics(annual_stmt)
+        
+        # 3분기까지의 누적 값 계산
+        q1_metrics = self.extract_metrics(q1_stmt) if q1_stmt else FinancialMetrics(None, None, None)
+        semi_metrics = self.extract_metrics(semi_stmt) if semi_stmt else FinancialMetrics(None, None, None)
+        q3_metrics = self.extract_metrics(q3_stmt) if q3_stmt else FinancialMetrics(None, None, None)
+        
+        cumulative_q3 = self._get_cumulative_q3(q1_metrics, semi_metrics, q3_metrics, q3_stmt)
+        
+        if cumulative_q3:
+            return self._calculate_diff(annual_metrics, cumulative_q3)
+        
+        return FinancialMetrics(None, None, None)
+
+    def _extract_corp_name(self, statements: List[Optional[FinancialStatement]]) -> str:
+        """보고서 목록에서 기업명 추출.
+        
+        Args:
+            statements: 재무제표 목록
+        
+        Returns:
+            기업명 (없으면 빈 문자열)
+        """
+        for stmt in statements:
+            if stmt and stmt.corp_name:
+                return stmt.corp_name
+        return ""
 
     def _get_cumulative_q3(
         self, 
