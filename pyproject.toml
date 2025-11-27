@@ -8,6 +8,7 @@ dependencies = [
     "dart-fss>=0.4.14",
     "dotenv>=0.9.9",
     "pytest>=9.0.1",
+    "typer[all]>=0.20.0",
 ]
 
 [build-system]
