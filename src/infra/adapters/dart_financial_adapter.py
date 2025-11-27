@@ -4,7 +4,7 @@ import json
 import os
 from datetime import datetime, date
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 import requests
 
 from core.domain.models.financial_statement import (
@@ -14,6 +14,7 @@ from core.domain.models.financial_statement import (
     ReportType,
 )
 from core.ports.financial_statement_port import FinancialStatementPort
+from infra.adapters.dart_response_parser import DartResponseParser
 
 
 class DartFinancialAdapter(FinancialStatementPort):
@@ -96,83 +97,50 @@ class DartFinancialAdapter(FinancialStatementPort):
         report_type: ReportType,
         fs_type: FinancialStatementType
     ) -> Optional[FinancialStatement]:
-        """DART API 호출."""
-        params = {
+        """DART API 호출 및 파싱.
+        
+        API 호출과 응답 파싱을 DartResponseParser에 위임합니다.
+        """
+        params = self._build_api_params(corp_code, year, report_type, fs_type)
+        
+        try:
+            response = requests.get(self._API_URL, params=params, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            
+            # 파싱 로직을 DartResponseParser에 위임
+            return DartResponseParser.parse_financial_statement(
+                data, corp_code, year, report_type, fs_type
+            )
+        
+        except (requests.RequestException, json.JSONDecodeError, KeyError):
+            return None
+    
+    def _build_api_params(
+        self,
+        corp_code: str,
+        year: int,
+        report_type: ReportType,
+        fs_type: FinancialStatementType
+    ) -> Dict[str, str]:
+        """API 요청 파라미터 생성.
+        
+        Args:
+            corp_code: 기업 코드
+            year: 사업 연도
+            report_type: 보고서 종류
+            fs_type: 재무제표 종류
+        
+        Returns:
+            API 요청 파라미터 딕셔너리
+        """
+        return {
             "crtfc_key": self._api_key,
             "corp_code": corp_code,
             "bsns_year": str(year),
             "reprt_code": report_type.value,
             "fs_div": fs_type.value,
         }
-
-        try:
-            response = requests.get(self._API_URL, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-
-            # 에러 응답 확인
-            status = data.get("status")
-            if status != "000":
-                # 디버깅: 에러 메시지 출력
-                print(f"API Error - Status: {status}, Message: {data.get('message', 'N/A')}")
-                print(f"  corp_code={corp_code}, year={year}, report={report_type.value}, fs={fs_type.value}")
-                return None
-
-            # 응답 파싱
-            items = data.get("list", [])
-            if not items:
-                print(f"No data - corp_code={corp_code}, year={year}, report={report_type.value}, fs={fs_type.value}")
-                return None
-
-            accounts = [
-                AccountItem(
-                    account_nm=item.get("account_nm", ""),
-                    thstrm_amount=item.get("thstrm_amount", "")
-                )
-                for item in items
-            ]
-
-            # 기업명 추출 (첫 번째 항목에서)
-            corp_name = items[0].get("corp_name", "")
-
-            # 날짜 파싱 (첫 번째 항목에서)
-            start_date = None
-            end_date = None
-            is_cumulative = False
-            
-            if items:
-                thstrm_dt = items[0].get("thstrm_dt", "")
-                if thstrm_dt:
-                    try:
-                        # "2023.01.01 ~ 2023.09.30" 형식 파싱
-                        dates = thstrm_dt.split("~")
-                        if len(dates) == 2:
-                            start_str = dates[0].strip()
-                            end_str = dates[1].strip()
-                            start_date = datetime.strptime(start_str, "%Y.%m.%d").date()
-                            end_date = datetime.strptime(end_str, "%Y.%m.%d").date()
-                            
-                            # 누적 여부 판단 (시작일이 1월 1일인지 확인)
-                            if start_date.month == 1 and start_date.day == 1:
-                                is_cumulative = True
-                    except ValueError:
-                        print(f"[WARNING] Date parsing failed: {thstrm_dt}")
-
-            return FinancialStatement(
-                corp_code=corp_code,
-                corp_name=corp_name,
-                bsns_year=year,
-                reprt_type=report_type,
-                fs_type=fs_type,
-                accounts=accounts,
-                extracted_at=datetime.now(),
-                start_date=start_date,
-                end_date=end_date,
-                is_cumulative=is_cumulative
-            )
-
-        except (requests.RequestException, json.JSONDecodeError, KeyError):
-            return None
 
     def _get_cache_path(
         self,
