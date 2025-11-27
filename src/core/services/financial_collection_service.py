@@ -131,7 +131,12 @@ class FinancialCollectionService:
             final_dfs["영업이익_연간"] = df_annual.pivot(index="기업명", columns="연도", values="영업이익")
             final_dfs["당기순이익_연간"] = df_annual.pivot(index="기업명", columns="연도", values="당기순이익")
 
-        logger.info(f"결과 저장 중: {output_path}")
+        # (3) 모든 데이터를 백만원 단위로 변환
+        for sheet_name, df in final_dfs.items():
+            # 숫자 컬럼만 백만원 단위로 변환 (인덱스 제외)
+            final_dfs[sheet_name] = (df / 1_000_000).round(0)
+
+        logger.info(f"결과 저장 중: {output_path} (단위: 백만원)")
         self._storage_port.save_excel_with_sheets(final_dfs, output_path)
         logger.info("완료.")
 

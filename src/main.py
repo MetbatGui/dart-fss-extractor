@@ -73,10 +73,10 @@ def main():
         pd.DataFrame({"기업명": company_names}).to_csv(target_file, index=False)
         logger.info(f"기본 기업 목록을 {target_file}에 저장했습니다.")
 
-    # 수집 설정
-    start_year = 2021
-    end_year = 2023
-    output_path = "output/financial_data_result.xlsx"
+    # 수집 설정 (10년치 데이터)
+    start_year = 2015
+    end_year = 2025
+    output_path = "output/financial_data_2015_2024.xlsx"
 
     logger.info(f"데이터 수집 시작: {len(company_names)}개 기업, {start_year}~{end_year}년")
     
