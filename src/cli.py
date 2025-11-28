@@ -56,9 +56,9 @@ def collect(
     기본값: 2015~2025년 (11년치) 데이터를 수집합니다.
     
     Examples:
-        $ uv run python src/cli.py collect
-        $ uv run python src/cli.py collect --start-year 2020 --end-year 2024
-        $ uv run python src/cli.py collect --companies "삼성전자,SK하이닉스"
+        $ uv run collector collect
+        $ uv run collector collect --start-year 2020 --end-year 2024
+        $ uv run collector collect --companies "삼성전자,SK하이닉스"
     """
     # .env 파일 로드
     load_dotenv()
