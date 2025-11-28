@@ -49,12 +49,19 @@ class LocalStorageAdapter(StoragePort):
             for sheet_name in writer.sheets:
                 worksheet = writer.sheets[sheet_name]
                 for column_cells in worksheet.iter_cols():
-                    max_length = max(
-                        len(str(cell.value)) if cell.value is not None else 0
-                        for cell in column_cells
-                    )
-                    # 약간 여유를 두어 열 너비 설정
-                    adjusted_width = max_length + 2
+                    max_length = 0
+                    for cell in column_cells:
+                        try:
+                            if cell.value is not None:
+                                # 한글은 너비 2배로 계산
+                                cell_value = str(cell.value)
+                                length = sum(2 if '\uac00' <= char <= '\ud7a3' else 1 for char in cell_value)
+                                max_length = max(max_length, length)
+                        except:
+                            pass
+                    
+                    # 최소 너비 10, 최대 너비 50으로 제한
+                    adjusted_width = min(max(max_length + 2, 10), 50)
                     column_letter = column_cells[0].column_letter
                     worksheet.column_dimensions[column_letter].width = adjusted_width
             # ----- bestfit 적용 끝 -----
