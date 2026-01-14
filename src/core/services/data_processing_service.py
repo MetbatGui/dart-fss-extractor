@@ -152,9 +152,13 @@ class DataProcessingService:
         q3_metrics = self.extract_metrics(q3_stmt)
         
         # 3분기가 누적(1.1~9.30)이면 반기를 빼야 함
-        if q3_stmt.is_cumulative and semi_stmt:
-            semi_metrics = self.extract_metrics(semi_stmt)
-            return self._calculate_diff(q3_metrics, semi_metrics)
+        if q3_stmt.is_cumulative:
+            if semi_stmt:
+                semi_metrics = self.extract_metrics(semi_stmt)
+                return self._calculate_diff(q3_metrics, semi_metrics)
+            else:
+                # 누적 데이터인데 뺄 반기 데이터가 없으면 계산 불가
+                return FinancialMetrics(None, None, None)
         
         # 3분기가 별도(7.1~9.30)면 그대로 사용
         return q3_metrics

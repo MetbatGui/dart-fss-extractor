@@ -29,7 +29,7 @@ class IncrementalUpdateService:
     }
     
     # 처리 대상 시트 (분기별만)
-    QUARTERLY_SHEETS = ["매출액_분기", "영업이익_분기", "당기순이익_분기"]
+    QUARTERLY_SHEETS = ["매출액_분기별", "영업이익_분기별", "당기순이익_분기별"]
     
     def __init__(
         self,
@@ -54,7 +54,8 @@ class IncrementalUpdateService:
         file_path: str,
         target_year: int,
         target_quarter: int,
-        auto_backup: bool = True
+        auto_backup: bool = True,
+        force_update: bool = False
     ) -> None:
         """특정 분기의 누락된 데이터를 업데이트합니다.
         
@@ -63,9 +64,10 @@ class IncrementalUpdateService:
             target_year: 대상 연도 (예: 2025)
             target_quarter: 대상 분기 (1, 2, 3, 4)
             auto_backup: 자동 백업 여부
+            force_update: 강제 업데이트 여부 (True면 모든 기업 재수집 및 덮어쓰기)
         """
         target_period = f"{target_year}.{target_quarter}Q"
-        logger.info(f"🚀 증분 업데이트 시작: {target_period} (파일: {file_path})")
+        logger.info(f"🚀 증분 업데이트 시작: {target_period} (파일: {file_path}, 강제 업데이트: {force_update})")
         
         # 1. 파일 백업
         if auto_backup:
@@ -79,26 +81,43 @@ class IncrementalUpdateService:
             logger.error(f"파일을 찾을 수 없습니다: {file_path}")
             return
 
-        # 3. 누락 기업 찾기
-        missing_companies = self.find_missing_companies(existing_sheets, target_period)
-        if not missing_companies:
-            logger.info(f"✨ 누락된 데이터가 없습니다. ({target_period})")
+        # 중복된 기업명(Index) 제거 - 데이터 무결성 및 오류 방지
+        for sheet_name, df in existing_sheets.items():
+            if df.index.duplicated().any():
+                dup_count = df.index.duplicated().sum()
+                logger.warning(f"⚠️ 시트 '{sheet_name}'에서 중복된 기업명 {dup_count}개 발견. 첫 번째 항목만 유지하고 중복을 제거합니다.")
+                existing_sheets[sheet_name] = df[~df.index.duplicated(keep='first')]
+
+        # 3. 대상 기업 찾기
+        if force_update:
+            logger.info("🔥 강제 업데이트 모드: 모든 기업을 대상으로 합니다.")
+            # 매출액 시트의 모든 인덱스(기업명)를 대상으로 함
+            if "매출액_분기별" in existing_sheets:
+                target_companies = existing_sheets["매출액_분기별"].index.tolist()
+            else:
+                logger.error("'매출액_분기별' 시트가 없어 대상을 특정할 수 없습니다.")
+                return
+        else:
+            target_companies = self.find_missing_companies(existing_sheets, target_period)
+        
+        if not target_companies:
+            logger.info(f"✨ 업데이트할 대상이 없습니다. ({target_period})")
             return
             
-        logger.info(f"📋 누락 기업 {len(missing_companies)}개 발견: {missing_companies[:5]}...")
+        logger.info(f"📋 대상 기업 {len(target_companies)}개 발견: {target_companies[:5]}...")
         
         # 4. 데이터 수집 (연도 전체)
         collected_data = []
         processed_count = 0
         
-        for idx, company_name in enumerate(missing_companies, 1):
+        for idx, company_name in enumerate(target_companies, 1):
             # API 호출 제한 체크
             if self._current_api_calls >= self._max_api_calls:
                 logger.warning(f"⚠️ API 호출 제한 도달! ({self._current_api_calls}/{self._max_api_calls})")
                 logger.info("작업을 중단하고 현재까지 수집된 데이터를 저장합니다.")
                 break
                 
-            logger.info(f"[{idx}/{len(missing_companies)}] {company_name} 데이터 수집 중... (API 호출: {self._current_api_calls})")
+            logger.info(f"[{idx}/{len(target_companies)}] {company_name} 데이터 수집 중... (API 호출: {self._current_api_calls})")
             
             try:
                 # 기업 코드 조회
@@ -126,9 +145,9 @@ class IncrementalUpdateService:
         logger.info(f"📊 수집된 데이터 변환 중... ({len(collected_data)}개 항목)")
         new_sheets = self._convert_to_wide_format(collected_data)
         
-        # 6. 병합 (기존 데이터 우선)
+        # 6. 병합 (강제 업데이트 시 덮어쓰기)
         logger.info("🔄 데이터 병합 중...")
-        merged_sheets = self.merge_quarterly_data(existing_sheets, new_sheets)
+        merged_sheets = self.merge_quarterly_data(existing_sheets, new_sheets, overwrite=force_update)
         
         # 7. 저장
         logger.info(f"💾 결과 저장 중: {file_path}")
@@ -142,9 +161,9 @@ class IncrementalUpdateService:
     ) -> List[str]:
         """특정 분기가 누락된 기업 목록을 찾습니다."""
         # 매출액_분기 시트 기준
-        revenue_sheet = sheets.get("매출액_분기")
+        revenue_sheet = sheets.get("매출액_분기별")
         if revenue_sheet is None:
-            logger.warning("'매출액_분기' 시트가 없습니다. 모든 기업을 대상으로 간주할 수 없으므로 빈 리스트 반환.")
+            logger.warning("'매출액_분기별' 시트가 없습니다. 모든 기업을 대상으로 간주할 수 없으므로 빈 리스트 반환.")
             return []
         
         missing = []
@@ -154,10 +173,16 @@ class IncrementalUpdateService:
             logger.info(f"'{target_period}' 컬럼이 없습니다. 모든 기업을 수집 대상으로 합니다.")
             return revenue_sheet.index.tolist()
             
-        # 컬럼은 있지만 값이 NaN인 경우
-        for company in revenue_sheet.index:
-            if pd.isna(revenue_sheet.loc[company, target_period]):
-                missing.append(company)
+        # 컬럼은 있지만 값이 NaN인 경우 (Vectorized check)
+        # revenue_sheet[target_period]가 Series(또는 DataFrame)를 반환하므로 isna() 결과도 Series/DataFrame
+        is_missing = revenue_sheet[target_period].isna()
+        
+        # 만약 컬럼이 중복되어 DataFrame으로 반환될 경우 처리
+        if isinstance(is_missing, pd.DataFrame):
+            is_missing = is_missing.any(axis=1)
+            
+        # boolean indexing으로 누락된 기업 추출
+        missing = revenue_sheet.index[is_missing].unique().tolist()
         
         return missing
 
@@ -220,22 +245,31 @@ class IncrementalUpdateService:
         # 단위 변환 (백만원)
         for col in ["매출액", "영업이익", "당기순이익"]:
             if col in df.columns:
-                df[col] = (df[col] / 1_000_000).round(0)
+                # Decimal 타입을 float으로 변환 (나눗셈 및 round 함수 지원을 위해)
+                df[col] = df[col].apply(lambda x: float(x) if x is not None else None)
+                df[col] = (df[col] / 100_000_000).round(0)
         
         sheets = {}
         if not df.empty:
-            sheets["매출액_분기"] = df.pivot(index="기업명", columns="기간", values="매출액")
-            sheets["영업이익_분기"] = df.pivot(index="기업명", columns="기간", values="영업이익")
-            sheets["당기순이익_분기"] = df.pivot(index="기업명", columns="기간", values="당기순이익")
+            sheets["매출액_분기별"] = df.pivot(index="기업명", columns="기간", values="매출액")
+            sheets["영업이익_분기별"] = df.pivot(index="기업명", columns="기간", values="영업이익")
+            sheets["당기순이익_분기별"] = df.pivot(index="기업명", columns="기간", values="당기순이익")
             
         return sheets
 
     def merge_quarterly_data(
         self,
         existing_sheets: Dict[str, pd.DataFrame],
-        new_sheets: Dict[str, pd.DataFrame]
+        new_sheets: Dict[str, pd.DataFrame],
+        overwrite: bool = False
     ) -> Dict[str, pd.DataFrame]:
-        """기존 데이터와 새 데이터를 병합합니다 (기존 데이터 우선)."""
+        """기존 데이터와 새 데이터를 병합합니다.
+        
+        Args:
+            existing_sheets: 기존 엑셀 시트 데이터
+            new_sheets: 새로 수집한 데이터
+            overwrite: True면 기존 데이터를 덮어씀 (False면 빈 칸만 채움)
+        """
         merged_sheets = {}
         
         for sheet_name in existing_sheets.keys():
@@ -251,9 +285,19 @@ class IncrementalUpdateService:
                 merged_sheets[sheet_name] = existing_df
                 continue
             
-            # 기존 데이터 우선 병합: existing의 NaN만 new로 채움
-            # combine_first는 호출하는 객체(existing)가 우선임
-            merged_df = existing_df.combine_first(new_df)
+            if overwrite:
+                # 덮어쓰기: update 사용 (인덱스와 컬럼이 일치하는 위치의 값을 new_df로 교체)
+                # update는 inplace 연산이므로 복사본 사용
+                merged_df = existing_df.copy()
+                merged_df.update(new_df)
+                
+                # update는 new_df에만 있는 새로운 컬럼/행을 추가하지 않음.
+                # 따라서 새로운 데이터가 있다면 combine_first로 추가해줘야 함.
+                # 하지만 update 후 combine_first를 하면 update된 값은 유지되고 빈 곳만 채워짐.
+                merged_df = merged_df.combine_first(new_df)
+            else:
+                # 기존 데이터 우선 병합: existing의 NaN만 new로 채움
+                merged_df = existing_df.combine_first(new_df)
             
             # 정렬
             merged_df = merged_df.sort_index(axis=0)  # 기업명 정렬
