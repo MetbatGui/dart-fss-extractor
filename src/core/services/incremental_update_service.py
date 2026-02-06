@@ -10,7 +10,7 @@ import pandas as pd
 from core.ports.file_reader_port import FileReaderPort
 from core.ports.corp_code_port import CorpCodePort
 from core.ports.financial_statement_port import FinancialStatementPort
-from core.ports.storage_port import StoragePort
+from core.ports.export_port import ExportPort
 from core.services.data_processing_service import DataProcessingService
 from core.domain.models.financial_statement import ReportType
 
@@ -36,14 +36,14 @@ class IncrementalUpdateService:
         file_reader: FileReaderPort,
         corp_code_port: CorpCodePort,
         financial_port: FinancialStatementPort,
-        storage_port: StoragePort,
+        export_port: ExportPort,
         processing_service: DataProcessingService,
         max_api_calls: int = 9950
     ):
         self._file_reader = file_reader
         self._corp_code_port = corp_code_port
         self._financial_port = financial_port
-        self._storage_port = storage_port
+        self._export_port = export_port
         self._processing_service = processing_service
         
         self._max_api_calls = max_api_calls
@@ -151,7 +151,7 @@ class IncrementalUpdateService:
         
         # 7. 저장
         logger.info(f"💾 결과 저장 중: {file_path}")
-        self._storage_port.save_excel_with_sheets(merged_sheets, file_path)
+        self._export_port.export_excel(merged_sheets, file_path)
         logger.info(f"✅ 업데이트 완료! (처리된 기업: {processed_count}개, 총 API 호출: {self._current_api_calls}회)")
 
     def find_missing_companies(

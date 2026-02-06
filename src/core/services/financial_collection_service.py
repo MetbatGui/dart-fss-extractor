@@ -8,7 +8,8 @@ import pandas as pd
 
 from core.ports.corp_code_port import CorpCodePort
 from core.ports.financial_statement_port import FinancialStatementPort
-from core.ports.storage_port import StoragePort
+from core.ports.repository_port import RepositoryPort
+from core.ports.export_port import ExportPort
 from core.domain.models.financial_statement import ReportType, FinancialStatementType
 from core.services.data_processing_service import DataProcessingService
 from core.domain.models.performance_metrics import QuarterlyMetrics
@@ -29,12 +30,14 @@ class FinancialCollectionService:
         self,
         corp_code_port: CorpCodePort,
         financial_port: FinancialStatementPort,
-        storage_port: StoragePort,
+        repository_port: RepositoryPort,
+        export_port: ExportPort,
         processing_service: DataProcessingService
     ):
         self._corp_code_port = corp_code_port
         self._financial_port = financial_port
-        self._storage_port = storage_port
+        self._repository_port = repository_port
+        self._export_port = export_port
         self._processing_service = processing_service
 
     def collect_and_save(
@@ -100,13 +103,18 @@ class FinancialCollectionService:
                     logger.error(f"{name} {year}년 데이터 수집 중 오류 발생: {e}")
                     continue
 
-        # 4. DataFrame 변환 및 Pivot (Wide Format)
         if not collected_data:
             logger.warning("수집된 데이터가 없습니다.")
             return
 
+        # 4. Parquet 저장 (Source of Truth)
         df_base = pd.DataFrame(collected_data)
-        
+        logger.info("수집된 원본 데이터를 저장소에 저장 중...")
+        # 키는 간단히 timestamp나 고정된 이름 사용. 여기서는 'financial_data_raw' 사용
+        self._repository_port.save_dataframe("financial_data_raw", df_base)
+
+
+        # 5. DataFrame 변환 및 Pivot (Wide Format) - Presentation Layer Preparation       
         # 결과 저장용 딕셔너리
         final_dfs = {}
         
@@ -136,8 +144,9 @@ class FinancialCollectionService:
             # 숫자 컬럼만 백만원 단위로 변환 (인덱스 제외)
             final_dfs[sheet_name] = (df / 1_000_000).round(0)
 
-        logger.info(f"결과 저장 중: {output_path} (단위: 백만원)")
-        self._storage_port.save_excel_with_sheets(final_dfs, output_path)
+        # 6. Excel Export
+        logger.info(f"결과 엑셀 파일 생성 중: {output_path} (단위: 백만원)")
+        self._export_port.export_excel(final_dfs, output_path)
         logger.info("완료.")
 
     def _append_to_list(

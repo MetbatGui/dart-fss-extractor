@@ -14,7 +14,8 @@ from core.services.financial_collection_service import FinancialCollectionServic
 from core.services.data_processing_service import DataProcessingService
 from infra.adapters.dart_financial_adapter import DartFinancialAdapter
 from infra.adapters.corp_code_adapter import CorpCodeAdapter
-from infra.adapters.local_storage_adapter import LocalStorageAdapter
+from infra.adapters.parquet_repository_adapter import ParquetRepositoryAdapter
+from infra.adapters.excel_export_adapter import ExcelExportAdapter
 
 # 로깅 설정
 logging.basicConfig(
@@ -40,7 +41,8 @@ def main():
     # 어댑터 초기화
     corp_code_adapter = CorpCodeAdapter()
     financial_adapter = DartFinancialAdapter(api_key=api_key, use_cache=True)
-    storage_adapter = LocalStorageAdapter()
+    repository_adapter = ParquetRepositoryAdapter()
+    export_adapter = ExcelExportAdapter()
     # DataProcessingService는 기본 설정 파일(config/account_keywords.toml) 사용
     processing_service = DataProcessingService()
 
@@ -48,7 +50,8 @@ def main():
     service = FinancialCollectionService(
         corp_code_port=corp_code_adapter,
         financial_port=financial_adapter,
-        storage_port=storage_adapter,
+        repository_port=repository_adapter,
+        export_port=export_adapter,
         processing_service=processing_service
     )
 

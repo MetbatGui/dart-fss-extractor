@@ -14,7 +14,7 @@ from core.services.incremental_update_service import IncrementalUpdateService
 from infra.adapters.local_file_reader_adapter import LocalFileReaderAdapter
 from infra.adapters.corp_code_adapter import CorpCodeAdapter
 from infra.adapters.dart_financial_adapter import DartFinancialAdapter
-from infra.adapters.local_storage_adapter import LocalStorageAdapter
+from infra.adapters.excel_export_adapter import ExcelExportAdapter
 from core.services.data_processing_service import DataProcessingService
 
 # 로깅 설정
@@ -49,7 +49,7 @@ def main():
     file_reader = LocalFileReaderAdapter()
     corp_code_port = CorpCodeAdapter()
     financial_port = DartFinancialAdapter(api_key=api_key, use_cache=True)
-    storage_port = LocalStorageAdapter()
+    export_port = ExcelExportAdapter()
     processing_service = DataProcessingService()
     
     # 서비스 초기화
@@ -57,7 +57,7 @@ def main():
         file_reader=file_reader,
         corp_code_port=corp_code_port,
         financial_port=financial_port,
-        storage_port=storage_port,
+        export_port=export_port,
         processing_service=processing_service,
         max_api_calls=args.max_api_calls
     )
