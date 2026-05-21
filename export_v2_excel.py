@@ -19,6 +19,39 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def load_corp_code_mappings() -> dict:
+    """CORPCODE.xml 및 corps.csv로부터 고유번호(8자리) -> 한글 기업명 매핑 딕셔너리를 구축합니다."""
+    mappings = {}
+    
+    # 1. corps.csv 로드 (종목명, 고유번호)
+    corps_csv = Path("data/corps.csv")
+    if corps_csv.exists():
+        try:
+            df_csv = pd.read_csv(corps_csv, header=None, names=["name", "code"], dtype=str)
+            for _, row in df_csv.iterrows():
+                mappings[row["code"]] = row["name"]
+        except Exception as e:
+            logger.error(f"corps.csv 로드 실패: {e}")
+            
+    # 2. CORPCODE.xml 로드 및 보강 (XML 파싱)
+    xml_path = Path("data/corp_code/CORPCODE.xml")
+    if xml_path.exists():
+        try:
+            import xml.etree.ElementTree as ET
+            logger.info("기업명 복원을 위해 CORPCODE.xml 파싱 중...")
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+            for list_node in root.findall("list"):
+                corp_code = list_node.find("corp_code").text
+                corp_name = list_node.find("corp_name").text
+                if corp_code and corp_name:
+                    mappings[corp_code] = corp_name
+            logger.info(f"CORPCODE.xml 로드 완료. 총 {len(mappings)}개의 매핑 테이블 확보.")
+        except Exception as e:
+            logger.error(f"CORPCODE.xml 파싱 중 오류 발생: {e}")
+            
+    return mappings
+
 def clear_output_directory(output_dir: Path) -> None:
     """output 디렉토리 안의 모든 파일과 서브디렉토리를 삭제합니다."""
     if not output_dir.exists():
@@ -142,6 +175,30 @@ def export_v2_integrated():
             # 오염 기업 데이터 제외
             df_base = df_base[~df_base["종목코드"].isin(invalid_codes)]
             logger.info(f"필터 가드 적용 후 남은 데이터: {len(df_base)}행")
+
+    # 2.2 기업명 컬럼에 유입된 고유번호/종목코드를 실제 한글 종목명으로 복원
+    if not df_base.empty:
+        mapping_dict = load_corp_code_mappings()
+        
+        # 기업명이 고유번호나 종목코드 형태로 되어 있는 경우 실제 한글 기업명으로 복원
+        def restore_name(row):
+            name_val = str(row["기업명"]).strip()
+            code_val = str(row["종목코드"]).strip()
+            
+            # 1단계: 기업명 값 자체가 매핑 딕셔너리에 존재하는 경우
+            if name_val in mapping_dict:
+                return mapping_dict[name_val]
+            
+            # 2단계: 기업명이 숫자로만 이루어져 있거나 종목코드와 동일할 때 종목코드 기반으로 매핑
+            if name_val.isdigit() or name_val == code_val:
+                if code_val in mapping_dict:
+                    return mapping_dict[code_val]
+                
+            return row["기업명"]
+            
+        logger.info("기업명 컬럼 내 수집 누락된 고유번호/종목코드를 한글 기업명으로 복원하는 중...")
+        df_base["기업명"] = df_base.apply(restore_name, axis=1)
+        logger.info("기업명 한글 복원 처리를 완료했습니다.")
 
     # 3. 데이터 가공 (Pivot 및 Scaling)
     final_dfs = {}
