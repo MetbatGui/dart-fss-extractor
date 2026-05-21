@@ -176,29 +176,35 @@ def export_v2_integrated():
             df_base = df_base[~df_base["종목코드"].isin(invalid_codes)]
             logger.info(f"필터 가드 적용 후 남은 데이터: {len(df_base)}행")
 
-    # 2.2 기업명 컬럼에 유입된 고유번호/종목코드를 실제 한글 종목명으로 복원
+    # 2.2 기업명 컬럼에 유입된 고유번호/종목코드 복원 가드 (Parquet가 이미 깨끗하므로 오염 발견 시에만 작동하여 성능을 획기적으로 개선)
     if not df_base.empty:
-        mapping_dict = load_corp_code_mappings()
+        # 기업명이 고유번호나 숫자로 되어 있는 행이 하나라도 존재하는지 선제 체크
+        needs_restoration = df_base["기업명"].astype(str).str.strip().str.match(r'^\d+$').any()
         
-        # 기업명이 고유번호나 종목코드 형태로 되어 있는 경우 실제 한글 기업명으로 복원
-        def restore_name(row):
-            name_val = str(row["기업명"]).strip()
-            code_val = str(row["종목코드"]).strip()
+        if needs_restoration:
+            logger.info("[GUARDIAN] 오염된 숫자형 기업명이 감지되었습니다. 2중 Fallback 매핑 사전을 구축하여 복원을 진행합니다...")
+            mapping_dict = load_corp_code_mappings()
             
-            # 1단계: 기업명 값 자체가 매핑 딕셔너리에 존재하는 경우
-            if name_val in mapping_dict:
-                return mapping_dict[name_val]
-            
-            # 2단계: 기업명이 숫자로만 이루어져 있거나 종목코드와 동일할 때 종목코드 기반으로 매핑
-            if name_val.isdigit() or name_val == code_val:
-                if code_val in mapping_dict:
-                    return mapping_dict[code_val]
+            def restore_name(row):
+                name_val = str(row["기업명"]).strip()
+                code_val = str(row["종목코드"]).strip()
                 
-            return row["기업명"]
-            
-        logger.info("기업명 컬럼 내 수집 누락된 고유번호/종목코드를 한글 기업명으로 복원하는 중...")
-        df_base["기업명"] = df_base.apply(restore_name, axis=1)
-        logger.info("기업명 한글 복원 처리를 완료했습니다.")
+                # 1단계: 기업명 값 자체가 매핑 딕셔너리에 존재하는 경우
+                if name_val in mapping_dict:
+                    return mapping_dict[name_val]
+                
+                # 2단계: 기업명이 숫자로만 이루어져 있거나 종목코드와 동일할 때 종목코드 기반으로 매핑
+                if name_val.isdigit() or name_val == code_val:
+                    if code_val in mapping_dict:
+                        return mapping_dict[code_val]
+                    
+                return row["기업명"]
+                
+            df_base["기업명"] = df_base.apply(restore_name, axis=1)
+            logger.info("[GUARDIAN] 오염 기업명 한글 복원 처리를 완벽하게 완료했습니다.")
+        else:
+            logger.info("[GUARDIAN] 전수 검사 결과, 이미 모든 Parquet 원본 기업명이 한글로 정비되어 있어 추가 복원 절차를 생략하고 고속 진행합니다.")
+
 
     # 3. 데이터 가공 (Pivot 및 Scaling)
     final_dfs = {}
