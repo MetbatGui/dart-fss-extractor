@@ -120,7 +120,28 @@ def export_v2_integrated():
         logger.error("통합 로드된 데이터가 없습니다. 저장소 경로 및 데이터를 확인하세요.")
         return
         
-    logger.info(f"성공적으로 {len(df_base)}행의 데이터를 통합 로드했습니다. 엑셀 가공을 시작합니다.")
+    logger.info(f"성공적으로 {len(df_base)}행의 데이터를 통합 로드했습니다. 비정상 캐시 데이터 정제 가드를 적용합니다.")
+
+    # 2.1 비정상 캐시 오염 기업 필터 가드 (매출액, 영업이익, 당기순이익이 모두 0.0이거나 결측치인 수집 오류 기업 배제)
+    if not df_base.empty:
+        df_temp = df_base.copy()
+        df_temp["매출액_abs"] = pd.to_numeric(df_temp["매출액"], errors="coerce").abs().fillna(0)
+        df_temp["영업이익_abs"] = pd.to_numeric(df_temp["영업이익"], errors="coerce").abs().fillna(0)
+        df_temp["당기순이익_abs"] = pd.to_numeric(df_temp["당기순이익"], errors="coerce").abs().fillna(0)
+        df_temp["실적합"] = df_temp["매출액_abs"] + df_temp["영업이익_abs"] + df_temp["당기순이익_abs"]
+        
+        # 기업별 실적합의 총합이 0인 비정상 기업 식별
+        zero_performance_corps = df_temp.groupby("종목코드")["실적합"].sum()
+        invalid_codes = zero_performance_corps[zero_performance_corps == 0].index.tolist()
+        
+        if invalid_codes:
+            for code in invalid_codes:
+                corp_name = df_base[df_base["종목코드"] == code]["기업명"].iloc[0]
+                logger.warning(f"[FILTER GUARD] 비정상 캐시 오염 기업 제거 완료: {corp_name} ({code}) - 모든 실적 데이터가 0.0 또는 결측치입니다.")
+            
+            # 오염 기업 데이터 제외
+            df_base = df_base[~df_base["종목코드"].isin(invalid_codes)]
+            logger.info(f"필터 가드 적용 후 남은 데이터: {len(df_base)}행")
 
     # 3. 데이터 가공 (Pivot 및 Scaling)
     final_dfs = {}
