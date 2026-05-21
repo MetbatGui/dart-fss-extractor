@@ -78,7 +78,7 @@ class CorpCodeAdapter(CorpCodePort):
         if self._XML_PATH.stat().st_size < 1024:
              raise ValueError(f"압축 해제된 XML 파일 크기가 너무 작습니다 ({self._XML_PATH.stat().st_size} bytes).")
 
-    def _load_mapping(self) -> Mapping[str, str]:
+    def _load_mapping(self, only_listed: bool = False) -> Mapping[str, str]:
         """XML 파일을 파싱해 ``{기업명: 기업코드}`` 사전을 만든다."""
         tree = ET.parse(self._XML_PATH)
         root = tree.getroot()
@@ -86,8 +86,15 @@ class CorpCodeAdapter(CorpCodePort):
         for corp in root.findall("./list"):
             name = corp.findtext("corp_name")
             code = corp.findtext("corp_code")
+            stock_code = corp.findtext("stock_code")
+            
             if name and code:
-                mapping[name] = code
+                if only_listed:
+                    # stock_code가 있고 공백이 아니면 상장사로 간주
+                    if stock_code and stock_code.strip():
+                        mapping[name] = code
+                else:
+                    mapping[name] = code
         return mapping
 
     # ---------------------------------------------------------------------
@@ -95,7 +102,11 @@ class CorpCodeAdapter(CorpCodePort):
     # ---------------------------------------------------------------------
     def get_all_mapping(self) -> Mapping[str, str]:
         """전체 기업명‑코드 매핑을 반환한다."""
-        return self._load_mapping()
+        return self._load_mapping(only_listed=False)
+
+    def get_listed_companies(self) -> Mapping[str, str]:
+        """상장사(종목코드가 있는 기업)명-코드 매핑을 반환한다."""
+        return self._load_mapping(only_listed=True)
 
     def get_code(self, company_name: str) -> Optional[str]:
         """단일 기업명의 코드를 조회한다.

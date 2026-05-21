@@ -247,7 +247,7 @@ class IncrementalUpdateService:
             if col in df.columns:
                 # Decimal 타입을 float으로 변환 (나눗셈 및 round 함수 지원을 위해)
                 df[col] = df[col].apply(lambda x: float(x) if x is not None else None)
-                df[col] = (df[col] / 100_000_000).round(0)
+                df[col] = (df[col] / 1_000_000).round(0)
         
         sheets = {}
         if not df.empty:

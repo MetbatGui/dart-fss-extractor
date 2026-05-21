@@ -20,6 +20,15 @@ class CorpCodePort(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def get_listed_companies(self) -> Mapping[str, str]:
+        """상장사(종목코드가 있는 기업)명-코드 매핑을 반환한다.
+
+        Returns:
+            Mapping[str, str]: {기업명: 기업코드} 형태의 사전.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def get_code(self, company_name: str) -> Optional[str]:
         """단일 기업명의 코드를 조회한다.
 

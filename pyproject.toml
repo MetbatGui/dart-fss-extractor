@@ -3,7 +3,7 @@ name = "dart-fss-extractor"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "dart-fss>=0.4.14",
     "dotenv>=0.9.9",
