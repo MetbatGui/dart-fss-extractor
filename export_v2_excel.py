@@ -131,24 +131,24 @@ def export_v2_integrated():
         # 기간 컬럼 생성 (예: 2023.1Q)
         df_quarter["기간"] = df_quarter["연도"].astype(int).astype(str) + "." + df_quarter["분기"].astype(str)
         
-        # 중복 제거 (기업명, 기간 기준)
-        df_quarter = df_quarter.drop_duplicates(subset=["기업명", "기간"])
+        # 중복 제거 (종목코드, 기간 기준)
+        df_quarter = df_quarter.drop_duplicates(subset=["종목코드", "기간"])
         
-        # Pivot
-        final_dfs["매출액_분기"] = df_quarter.pivot(index="기업명", columns="기간", values="매출액")
-        final_dfs["영업이익_분기"] = df_quarter.pivot(index="기업명", columns="기간", values="영업이익")
-        final_dfs["당기순이익_분기"] = df_quarter.pivot(index="기업명", columns="기간", values="당기순이익")
+        # Pivot (기업명과 종목코드가 나란히 엑셀에 출력되도록 멀티인덱스 지정)
+        final_dfs["매출액_분기"] = df_quarter.pivot(index=["기업명", "종목코드"], columns="기간", values="매출액")
+        final_dfs["영업이익_분기"] = df_quarter.pivot(index=["기업명", "종목코드"], columns="기간", values="영업이익")
+        final_dfs["당기순이익_분기"] = df_quarter.pivot(index=["기업명", "종목코드"], columns="기간", values="당기순이익")
 
     # (2) 연간 데이터 처리
     df_annual = df_base[df_base["구분"] == "연간"].copy()
     if not df_annual.empty:
-        # 중복 제거
-        df_annual = df_annual.drop_duplicates(subset=["기업명", "연도"])
+        # 중복 제거 (종목코드, 연도 기준)
+        df_annual = df_annual.drop_duplicates(subset=["종목코드", "연도"])
         
-        # Pivot
-        final_dfs["매출액_연간"] = df_annual.pivot(index="기업명", columns="연도", values="매출액")
-        final_dfs["영업이익_연간"] = df_annual.pivot(index="기업명", columns="연도", values="영업이익")
-        final_dfs["당기순이익_연간"] = df_annual.pivot(index="기업명", columns="연도", values="당기순이익")
+        # Pivot (기업명과 종목코드가 나란히 엑셀에 출력되도록 멀티인덱스 지정)
+        final_dfs["매출액_연간"] = df_annual.pivot(index=["기업명", "종목코드"], columns="연도", values="매출액")
+        final_dfs["영업이익_연간"] = df_annual.pivot(index=["기업명", "종목코드"], columns="연도", values="영업이익")
+        final_dfs["당기순이익_연간"] = df_annual.pivot(index=["기업명", "종목코드"], columns="연도", values="당기순이익")
 
     # (3) 단위 변환 (원 -> 백만 원)
     DIVISOR = 1_000_000 # 백만 원 단위
