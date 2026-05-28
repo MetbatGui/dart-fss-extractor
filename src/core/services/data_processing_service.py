@@ -3,16 +3,6 @@
 import re
 import logging
 from typing import List, Optional, Dict
-import sys
-
-# Python 3.11+ 사용 시 tomllib, 이하 버전은 tomli 사용
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    try:
-        import tomli as tomllib
-    except ImportError:
-        raise ImportError("Python 3.10 이하에서는 'tomli' 패키지가 필요합니다. pip install tomli")
 
 from core.domain.models.financial_statement import AccountItem, FinancialStatement, FinancialStatementType
 from core.domain.models.performance_metrics import FinancialMetrics, QuarterlyMetrics

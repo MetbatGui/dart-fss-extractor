@@ -4,6 +4,7 @@ import logging
 import shutil
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import List, Dict
 import pandas as pd
 
@@ -312,7 +313,7 @@ class IncrementalUpdateService:
                         quarter_num = int(quarter[0])  # "1Q" -> 1
                         return (int(year), quarter_num)
                     return (0, 0)
-                except:
+                except Exception:
                     return (0, 0)
             
             sorted_cols = sorted(merged_df.columns, key=sort_key)
@@ -325,7 +326,8 @@ class IncrementalUpdateService:
     def _backup_file(self, file_path: str) -> str:
         """파일을 백업합니다."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = file_path.replace(".xlsx", f"_backup_{timestamp}.xlsx")
+        file_path_obj = Path(file_path)
+        backup_path = file_path_obj.with_name(f"{file_path_obj.stem}_backup_{timestamp}.xlsx")
         try:
             shutil.copy2(file_path, backup_path)
             logger.info(f"📦 백업 완료: {backup_path}")

@@ -451,27 +451,15 @@ class FinancialCollectionService:
                 "당기순이익": metrics.annual_metrics.net_income
             })
         else:
-            # 백업: 1~4Q 합산으로 처리.
-            total_revenue = 0
-            total_op = 0
-            total_net = 0
-            has_data = False
-
-            for q in ["1Q", "2Q", "3Q", "4Q"]:
-                m = metrics.metrics_by_quarter.get(q)
-                if m:
-                    if m.revenue is not None: total_revenue += m.revenue
-                    if m.operating_profit is not None: total_op += m.operating_profit
-                    if m.net_income is not None: total_net += m.net_income
-                    has_data = True
-            
-            if has_data:
+            # 백업: 1~4Q 합산으로 처리
+            annual = self._processing_service.calculate_annual_from_quarters(metrics.metrics_by_quarter)
+            if annual.revenue is not None or annual.operating_profit is not None or annual.net_income is not None:
                 data_list.append({
                     "기업명": name,
                     "연도": year,
                     "구분": "연간",
-                    "분기": "연간", # Pivot시 사용 안함
-                    "매출액": total_revenue,
-                    "영업이익": total_op,
-                    "당기순이익": total_net
+                    "분기": "연간",  # Pivot시 사용 안함
+                    "매출액": annual.revenue,
+                    "영업이익": annual.operating_profit,
+                    "당기순이익": annual.net_income
                 })
