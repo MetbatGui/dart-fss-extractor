@@ -24,11 +24,11 @@ def create_statement(revenue: str, op_profit: str, net_income: str, is_cumulativ
     add_net = net_income if is_cumulative else None
 
     if revenue:
-        accounts.append(AccountItem("매출액", revenue, thstrm_add_amount=add_rev))
+        accounts.append(AccountItem("매출액", revenue, cumulative_amount=add_rev))
     if op_profit:
-        accounts.append(AccountItem("영업이익", op_profit, thstrm_add_amount=add_op))
+        accounts.append(AccountItem("영업이익", op_profit, cumulative_amount=add_op))
     if net_income:
-        accounts.append(AccountItem("당기순이익", net_income, thstrm_add_amount=add_net))
+        accounts.append(AccountItem("당기순이익", net_income, cumulative_amount=add_net))
         
     return FinancialStatement(
         corp_code="test",

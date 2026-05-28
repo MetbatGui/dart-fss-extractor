@@ -3,7 +3,6 @@
 import re
 import logging
 from typing import List, Optional, Dict
-from pathlib import Path
 import sys
 
 # Python 3.11+ 사용 시 tomllib, 이하 버전은 tomli 사용
@@ -23,21 +22,11 @@ logger = logging.getLogger(__name__)
 class DataProcessingService:
     """재무 데이터 처리 및 변환을 담당하는 서비스."""
 
-    def __init__(self, config_path: Optional[str] = None):
-        if config_path is None:
-            current_file = Path(__file__)
-            project_root = current_file.parent.parent.parent.parent
-            config_path = project_root / "config" / "account_keywords.toml"
-        else:
-            config_path = Path(config_path)
-        
-        if config_path.exists():
-            with open(config_path, "rb") as f:
-                config = tomllib.load(f)
-            keywords = config.get("account_keywords", {})
-            self.REVENUE_KEYWORDS = keywords.get("revenue", [])
-            self.OP_PROFIT_KEYWORDS = keywords.get("operating_profit", [])
-            self.NET_INCOME_KEYWORDS = keywords.get("net_income", [])
+    def __init__(self, keywords_config: Optional[Dict[str, List[str]]] = None):
+        if keywords_config is not None:
+            self.REVENUE_KEYWORDS = keywords_config.get("revenue", [])
+            self.OP_PROFIT_KEYWORDS = keywords_config.get("operating_profit", [])
+            self.NET_INCOME_KEYWORDS = keywords_config.get("net_income", [])
         else:
             self.REVENUE_KEYWORDS = ["매출액", "수익(매출액)", "영업수익", "매출"]
             self.OP_PROFIT_KEYWORDS = ["영업이익", "영업이익(손실)"]
@@ -64,14 +53,14 @@ class DataProcessingService:
         # 0. 공시 자릿수(스케일) 불일치 자동 정규화 가드 적용
         self._normalize_statement_scales(q1_stmt, semi_stmt, q3_stmt, annual_stmt)
         
-        # 0-1. 도메인 모델에 누적금액(thstrm_add_amount)이 물리적으로 존재하여 파싱되었는지 판별하는 헬퍼
+        # 0-1. 도메인 모델에 누적금액(cumulative_amount)이 물리적으로 존재하여 파싱되었는지 판별하는 헬퍼
         def check_has_add(stmt: Optional[FinancialStatement]) -> bool:
             if not stmt or not stmt.accounts:
                 return False
             all_keywords = self.REVENUE_KEYWORDS + self.OP_PROFIT_KEYWORDS + self.NET_INCOME_KEYWORDS
             for item in stmt.accounts:
                 if item.account_nm.strip() in all_keywords:
-                    if hasattr(item, "thstrm_add_amount") and item.thstrm_add_amount and item.thstrm_add_amount.strip() not in ["", "-"]:
+                    if item.cumulative_amount and item.cumulative_amount.strip() not in ["", "-"]:
                         return True
             return False
 
@@ -245,9 +234,9 @@ class DataProcessingService:
             # 자본과 오인될 수 없는 명확한 일반 당기순이익 키워드 값 탐색
             if nm in ["당기순이익", "당기순이익(손실)", "분기순이익", "분기순이익(손실)", "반기순이익", "반기순이익(손실)"]:
                 if use_cumulative:
-                    val_str = item.thstrm_add_amount if hasattr(item, "thstrm_add_amount") and item.thstrm_add_amount else item.thstrm_amount
+                    val_str = item.cumulative_amount if item.cumulative_amount else item.amount
                 else:
-                    val_str = item.thstrm_amount
+                    val_str = item.amount
                 if val_str and val_str.strip() not in ["", "-"]:
                     try:
                         reference_net_income = abs(int(re.sub(r'[^0-9-]', '', val_str)))
@@ -261,8 +250,8 @@ class DataProcessingService:
         if is_revenue_search:
             has_integrated_revenue = False
             for item in accounts:
-                sj_div = getattr(item, "sj_div", None)
-                if sj_div and sj_div.strip().upper() == "BS":
+                statement_type = item.statement_type
+                if statement_type and statement_type.strip().upper() == "BS":
                     continue
                 if item.account_nm.strip() in ["매출액", "영업수익", "매출"]:
                     has_integrated_revenue = True
@@ -272,11 +261,11 @@ class DataProcessingService:
                 export_val = None
                 domestic_val = None
                 for item in accounts:
-                    sj_div = getattr(item, "sj_div", None)
-                    if sj_div and sj_div.strip().upper() == "BS":
+                    statement_type = item.statement_type
+                    if statement_type and statement_type.strip().upper() == "BS":
                         continue
                     nm = item.account_nm.strip()
-                    val_str = item.thstrm_add_amount if use_cumulative and hasattr(item, "thstrm_add_amount") and item.thstrm_add_amount else item.thstrm_amount
+                    val_str = item.cumulative_amount if use_cumulative and item.cumulative_amount else item.amount
                     if not val_str or val_str.strip() in ["", "-"]:
                         continue
                     try:
@@ -295,17 +284,17 @@ class DataProcessingService:
         # 1. 완전 일치 우선순위 탐색 (키워드 순서 준수)
         for kw in keywords:
             for item in accounts:
-                # 안전장치 1: sj_div가 명시적으로 BS(재무상태표)인 자본 항목은 손익 항목 매칭에서 전면 배제
-                sj_div = getattr(item, "sj_div", None)
-                if sj_div and sj_div.strip().upper() == "BS":
+                # 안전장치 1: statement_type이 명시적으로 BS(재무상태표)인 자본 항목은 손익 항목 매칭에서 전면 배제
+                statement_type = item.statement_type
+                if statement_type and statement_type.strip().upper() == "BS":
                     continue
                 
                 name = item.account_nm.strip()
                 if name == kw:
                     if use_cumulative:
-                        val_str = item.thstrm_add_amount if hasattr(item, "thstrm_add_amount") and item.thstrm_add_amount else item.thstrm_amount
+                        val_str = item.cumulative_amount if item.cumulative_amount else item.amount
                     else:
-                        val_str = item.thstrm_amount
+                        val_str = item.amount
                         
                     if not val_str or val_str.strip() in ["", "-"]:
                         continue
@@ -325,17 +314,17 @@ class DataProcessingService:
         # 2. 부분 일치 우선순위 탐색 (키워드 순서 준수)
         for kw in keywords:
             for item in accounts:
-                # 안전장치 1: sj_div가 명시적으로 BS인 경우 배제
-                sj_div = getattr(item, "sj_div", None)
-                if sj_div and sj_div.strip().upper() == "BS":
+                # 안전장치 1: statement_type이 명시적으로 BS인 경우 배제
+                statement_type = item.statement_type
+                if statement_type and statement_type.strip().upper() == "BS":
                     continue
                     
                 name = item.account_nm.strip()
                 if kw in name:
                     if use_cumulative:
-                        val_str = item.thstrm_add_amount if hasattr(item, "thstrm_add_amount") and item.thstrm_add_amount else item.thstrm_amount
+                        val_str = item.cumulative_amount if item.cumulative_amount else item.amount
                     else:
-                        val_str = item.thstrm_amount
+                        val_str = item.amount
                         
                     if not val_str or val_str.strip() in ["", "-"]:
                         continue
@@ -374,7 +363,7 @@ class DataProcessingService:
         for stmt in statements:
             vals = []
             for item in stmt.accounts:
-                for attr in ["thstrm_amount", "thstrm_add_amount"]:
+                for attr in ["amount", "cumulative_amount"]:
                     val_str = getattr(item, attr, None)
                     if val_str and val_str.strip() not in ["", "-"]:
                         try:
@@ -419,7 +408,7 @@ class DataProcessingService:
                 )
                 
                 for item in stmt.accounts:
-                    for attr in ["thstrm_amount", "thstrm_add_amount"]:
+                    for attr in ["amount", "cumulative_amount"]:
                         val_str = getattr(item, attr, None)
                         if val_str and val_str.strip() not in ["", "-"]:
                             try:

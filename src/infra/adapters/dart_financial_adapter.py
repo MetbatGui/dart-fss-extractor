@@ -340,10 +340,10 @@ class DartFinancialAdapter(FinancialStatementPort):
             accounts = [
                 AccountItem(
                     account_nm=item["account_nm"],
-                    thstrm_amount=item["thstrm_amount"],
-                    thstrm_add_amount=item.get("thstrm_add_amount", ""),
-                    thstrm_nm=item.get("thstrm_nm"),
-                    sj_div=item.get("sj_div")
+                    amount=item["thstrm_amount"],
+                    cumulative_amount=item.get("thstrm_add_amount", ""),
+                    period_name=item.get("thstrm_nm"),
+                    statement_type=item.get("sj_div")
                 )
                 for item in data["accounts"]
             ]

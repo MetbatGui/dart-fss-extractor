@@ -112,10 +112,10 @@ class DartResponseParser:
         return [
             AccountItem(
                 account_nm=item.get("account_nm", ""),
-                thstrm_amount=item.get("thstrm_amount", ""),
-                thstrm_add_amount=item.get("thstrm_add_amount", ""),
-                thstrm_nm=item.get("thstrm_nm", ""),
-                sj_div=item.get("sj_div", "")
+                amount=item.get("thstrm_amount", ""),
+                cumulative_amount=item.get("thstrm_add_amount", ""),
+                period_name=item.get("thstrm_nm", ""),
+                statement_type=item.get("sj_div", "")
             )
             for item in items
             if (not item.get("fs_div") or str(item.get("fs_div")).strip() == "" or item.get("fs_div") == target_div)

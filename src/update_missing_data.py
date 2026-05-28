@@ -4,6 +4,7 @@ import argparse
 import logging
 import sys
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 
@@ -42,12 +43,24 @@ def main():
     
     logger.info("서비스 초기화 중...")
     
+    # 설정 파일 직접 로드 (DI 적용)
+    config_path = Path("config/account_keywords.toml")
+    keywords_config = None
+    if config_path.exists():
+        try:
+            import tomllib
+            with open(config_path, "rb") as f:
+                config = tomllib.load(f)
+            keywords_config = config.get("account_keywords", {})
+        except Exception as e:
+            logger.error(f"설정 파일 읽기 실패: {e}")
+
     # 어댑터 초기화
     file_reader = LocalFileReaderAdapter()
     corp_code_port = CorpCodeAdapter()
     financial_port = DartFinancialAdapter(api_key=api_key, use_cache=True)
     export_port = ExcelExportAdapter()
-    processing_service = DataProcessingService()
+    processing_service = DataProcessingService(keywords_config=keywords_config)
     
     # 서비스 초기화
     service = IncrementalUpdateService(

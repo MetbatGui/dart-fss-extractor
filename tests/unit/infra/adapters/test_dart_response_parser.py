@@ -74,9 +74,9 @@ def test_parse_financial_statement_valid():
     # 계정과목 확인
     assert len(result.accounts) == 2
     assert result.accounts[0].account_nm == "유동자산"
-    assert result.accounts[0].thstrm_amount == "210,000,000,000"
+    assert result.accounts[0].amount == "210,000,000,000"
     assert result.accounts[1].account_nm == "매출액"
-    assert result.accounts[1].thstrm_amount == "300,000,000,000"
+    assert result.accounts[1].amount == "300,000,000,000"
 
     # 날짜 확인
     assert result.start_date == date(2023, 1, 1)
