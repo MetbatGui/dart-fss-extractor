@@ -21,11 +21,12 @@ class DartFinancialAdapter(FinancialStatementPort):
     """DART API를 통한 재무제표 조회 어댑터.
     
     - 연결재무제표 우선 조회, 실패 시 개별재무제표로 fallback
-    - 로컬 캐싱 지원
+    - 로컬 캐싱 지원 (데이터 없음 상태 포함)
     """
 
     _API_URL = "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json"
     _CACHE_DIR = Path(os.getenv("OUTPUT_DIRECTORY", "./data")).resolve() / "financial_statements"
+    _NO_DATA_MARKER = "NO_DATA"
 
     def __init__(self, api_key: Optional[str] = None, use_cache: bool = True):
         """초기화.
@@ -39,6 +40,12 @@ class DartFinancialAdapter(FinancialStatementPort):
             raise EnvironmentError("DART_API_KEY가 설정되지 않았습니다.")
         self._use_cache = use_cache
         self._CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self._call_count = 0
+
+    @property
+    def call_count(self) -> int:
+        """API 호출 횟수 반환."""
+        return self._call_count
 
 
     def get_financial_statement(
@@ -48,17 +55,61 @@ class DartFinancialAdapter(FinancialStatementPort):
         report_type: ReportType,
         prefer_consolidated: bool = True
     ) -> Optional[FinancialStatement]:
-        """재무제표 조회.
+        """재무제표 조회 (통합 조회 메서드 활용)."""
+        results = self.get_all_statements(corp_code, year, report_type)
         
-        캐시 확인 → API 조회 순서로 진행하며, 연결/개별 우선순위를 고려합니다.
-        """
+        # 우선순위에 따라 반환
+        fs_types = self._get_fs_type_priority(prefer_consolidated)
+        for fs_type in fs_types:
+            if fs_type in results:
+                return results[fs_type]
+        return None
+
+    def get_all_statements(
+        self,
+        corp_code: str,
+        year: int,
+        report_type: ReportType
+    ) -> Dict[FinancialStatementType, FinancialStatement]:
+        """연결과 개별 재무제표를 각각 DART API로 조회."""
+        results = {}
+        missing_types = []
+        
         # 1. 캐시 확인
-        statement = self._check_cache(corp_code, year, report_type, prefer_consolidated)
-        if statement:
-            return statement
+        for fs_type in [FinancialStatementType.CONSOLIDATED, FinancialStatementType.SEPARATE]:
+            cached = self._load_from_cache(corp_code, year, report_type, fs_type)
+            if cached:
+                if cached != self._NO_DATA_MARKER:
+                    results[fs_type] = cached
+            else:
+                missing_types.append(fs_type)
         
-        # 2. API 조회
-        return self._fetch_with_fallback(corp_code, year, report_type, prefer_consolidated)
+        # 2. 누락된 유형이 있으면 각각 API 호출
+        for fs_type in missing_types:
+            params = self._build_api_params(corp_code, year, report_type, fs_type)
+            
+            try:
+                self._call_count += 1
+                response = requests.get(self._API_URL, params=params, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+                
+                # 파싱 (CFS 또는 OFS 추출)
+                new_results = DartResponseParser.parse_all(data, corp_code, year, report_type)
+                
+                # 결과 캐싱 및 병합
+                if fs_type in new_results:
+                    fs = new_results[fs_type]
+                    self._save_to_cache(fs)
+                    results[fs_type] = fs
+                else:
+                    # 응답에 없는 경우 '데이터 없음'으로 캐시
+                    self._save_negative_cache(corp_code, year, report_type, fs_type)
+                        
+            except Exception as e:
+                logger.error(f"API call failed for {corp_code} {year} {report_type.value} ({fs_type.value}): {e}")
+        
+        return results
 
     def _check_cache(
         self,
@@ -79,6 +130,7 @@ class DartFinancialAdapter(FinancialStatementPort):
         for fs_type in fs_types:
             cached = self._load_from_cache(corp_code, year, report_type, fs_type)
             if cached:
+                # 데이터가 있거나, '데이터 없음'으로 캐시된 경우 모두 반환
                 return cached
         
         return None
@@ -97,10 +149,14 @@ class DartFinancialAdapter(FinancialStatementPort):
         fs_types = self._get_fs_type_priority(prefer_consolidated)
         
         for fs_type in fs_types:
-            statement = self._fetch_from_api(corp_code, year, report_type, fs_type)
-            if statement:
-                self._save_to_cache(statement)
-                return statement
+            result = self._fetch_from_api(corp_code, year, report_type, fs_type)
+            if result == self._NO_DATA_MARKER:
+                self._save_negative_cache(corp_code, year, report_type, fs_type)
+                continue
+                
+            if result:
+                self._save_to_cache(result)
+                return result
         
         return None
     
@@ -135,6 +191,13 @@ class DartFinancialAdapter(FinancialStatementPort):
             response.raise_for_status()
             data = response.json()
             
+            # 실제 API 호출이 발생했으므로 카운트 증가
+            self._call_count += 1
+            
+            status = data.get("status")
+            if status == "013":
+                return self._NO_DATA_MARKER
+                
             # 파싱 로직을 DartResponseParser에 위임
             return DartResponseParser.parse_financial_statement(
                 data, corp_code, year, report_type, fs_type
@@ -142,6 +205,31 @@ class DartFinancialAdapter(FinancialStatementPort):
         
         except (requests.RequestException, json.JSONDecodeError, KeyError):
             return None
+    
+    def _save_negative_cache(
+        self, 
+        corp_code: str, 
+        year: int, 
+        report_type: ReportType, 
+        fs_type: FinancialStatementType
+    ) -> None:
+        """'데이터 없음' 상태를 캐시에 저장."""
+        if not self._use_cache:
+            return
+            
+        cache_path = self._get_cache_path(corp_code, year, report_type, fs_type)
+        data = {
+            "status": "013",
+            "message": "조회된 데이타가 없습니다.",
+            "corp_code": corp_code,
+            "bsns_year": year,
+            "reprt_type": report_type.value,
+            "fs_type": fs_type.value,
+            "cached_at": datetime.now().isoformat()
+        }
+        
+        with cache_path.open("w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
     
     def _build_api_params(
         self,
@@ -209,7 +297,13 @@ class DartFinancialAdapter(FinancialStatementPort):
             "reprt_type": statement.reprt_type.value,
             "fs_type": statement.fs_type.value,
             "accounts": [
-                {"account_nm": acc.account_nm, "thstrm_amount": acc.thstrm_amount}
+                {
+                    "account_nm": acc.account_nm,
+                    "thstrm_amount": acc.thstrm_amount,
+                    "thstrm_add_amount": acc.thstrm_add_amount,
+                    "thstrm_nm": acc.thstrm_nm,
+                    "sj_div": getattr(acc, "sj_div", None)
+                }
                 for acc in statement.accounts
             ],
             "extracted_at": statement.extracted_at.isoformat(),
@@ -240,10 +334,16 @@ class DartFinancialAdapter(FinancialStatementPort):
             with cache_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
 
+            if data.get("status") == "013":
+                return self._NO_DATA_MARKER
+                
             accounts = [
                 AccountItem(
                     account_nm=item["account_nm"],
-                    thstrm_amount=item["thstrm_amount"]
+                    amount=item["thstrm_amount"],
+                    cumulative_amount=item.get("thstrm_add_amount", ""),
+                    period_name=item.get("thstrm_nm"),
+                    statement_type=item.get("sj_div")
                 )
                 for item in data["accounts"]
             ]

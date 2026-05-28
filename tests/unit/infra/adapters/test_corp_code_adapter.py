@@ -90,13 +90,19 @@ def test_force_download() -> None:
     temp_root = Path(tempfile.mkdtemp())
     
     # Mock environment and requests
-    with patch.dict(os.environ, {"ROOT_DIR": str(temp_root), "DART_API_KEY": "dummy_key"}), \
+    # CorpCodeAdapter uses OUTPUT_DIRECTORY for cache path
+    with patch.dict(os.environ, {"OUTPUT_DIRECTORY": str(temp_root), "DART_API_KEY": "dummy_key"}), \
          patch("requests.get") as mock_get:
         
         # Create a dummy zip file containing a dummy XML
-        dummy_xml = b"<result><list><corp_code>12345678</corp_code><corp_name>Test Corp</corp_name><stock_code>123456</stock_code><modify_date>20230101</modify_date></list></result>"
+        # Create a dummy zip file containing a dummy XML
+        dummy_xml = (
+            b"<result><list><corp_code>12345678</corp_code><corp_name>Test Corp</corp_name>"
+            b"<stock_code>123456</stock_code><modify_date>20230101</modify_date></list>"
+            + b"<!-- " + b"x" * 2000 + b" --></result>"
+        )
         zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_STORED) as zf:
             zf.writestr("CORPCODE.xml", dummy_xml)
         
         mock_response = MagicMock()

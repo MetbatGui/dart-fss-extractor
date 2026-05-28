@@ -1,4 +1,4 @@
-"""Local Storage Adapter 테스트."""
+"""Excel Export Adapter 테스트."""
 
 import os
 import tempfile
@@ -6,13 +6,13 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from infra.adapters.local_storage_adapter import LocalStorageAdapter
+from infra.adapters.excel_export_adapter import ExcelExportAdapter
 
 
 @pytest.fixture
 def adapter():
     """테스트용 어댑터 인스턴스."""
-    return LocalStorageAdapter(ensure_dir=True)
+    return ExcelExportAdapter()
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def temp_dir():
         yield tmpdir
 
 
-def test_save_excel_with_single_sheet(adapter, temp_dir):
+def test_export_excel_with_single_sheet(adapter, temp_dir):
     """단일 시트 저장 테스트."""
     # Arrange
     df = pd.DataFrame({
@@ -34,7 +34,7 @@ def test_save_excel_with_single_sheet(adapter, temp_dir):
     file_path = Path(temp_dir) / 'test_single.xlsx'
 
     # Act
-    adapter.save_excel_with_sheets(dataframes, str(file_path))
+    adapter.export_excel(dataframes, str(file_path))
 
     # Assert
     assert file_path.exists(), "엑셀 파일이 생성되어야 합니다"
@@ -45,7 +45,7 @@ def test_save_excel_with_single_sheet(adapter, temp_dir):
     assert list(loaded_df.columns) == list(df.columns), "컬럼이 일치해야 합니다"
 
 
-def test_save_excel_with_multiple_sheets(adapter, temp_dir):
+def test_export_excel_with_multiple_sheets(adapter, temp_dir):
     """다중 시트 저장 테스트 (6개 시트)."""
     # Arrange
     df1 = pd.DataFrame({'기업명': ['삼성전자'], '2023Q1': [25], '2023Q2': [30]})
@@ -66,7 +66,7 @@ def test_save_excel_with_multiple_sheets(adapter, temp_dir):
     file_path = Path(temp_dir) / 'test_multi.xlsx'
 
     # Act
-    adapter.save_excel_with_sheets(dataframes, str(file_path))
+    adapter.export_excel(dataframes, str(file_path))
 
     # Assert
     assert file_path.exists(), "엑셀 파일이 생성되어야 합니다"
@@ -87,12 +87,12 @@ def test_save_excel_with_multiple_sheets(adapter, temp_dir):
 def test_auto_create_directory(temp_dir):
     """디렉터리 자동 생성 테스트."""
     # Arrange
-    adapter = LocalStorageAdapter(ensure_dir=True)
+    adapter = ExcelExportAdapter()
     df = pd.DataFrame({'A': [1, 2]})
     file_path = Path(temp_dir) / 'subdir' / 'nested' / 'test.xlsx'
     
     # Act
-    adapter.save_excel_with_sheets({'Sheet1': df}, str(file_path))
+    adapter.export_excel({'Sheet1': df}, str(file_path))
     
     # Assert
     assert file_path.exists(), "중첩 디렉터리가 자동 생성되고 파일이 저장되어야 합니다"

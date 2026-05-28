@@ -24,7 +24,10 @@ class FinancialStatementType(Enum):
 class AccountItem:
     """계정과목 항목."""
     account_nm: str          # 계정과목명
-    thstrm_amount: str       # 당기금액 (문자열로 받음)
+    amount: str              # 당기금액 (문자열로 받음)
+    cumulative_amount: Optional[str] = None  # 당기누적금액 (문자열로 받음)
+    period_name: Optional[str] = None  # 항목 기간명 (예: "3분기 누적")
+    statement_type: Optional[str] = None     # 재무제표 구분 (예: BS, IS 등)
     
     
 @dataclass

@@ -31,6 +31,7 @@ class QuarterlyMetrics:
     """
     corp_name: str
     metrics_by_quarter: Dict[str, FinancialMetrics] = field(default_factory=dict)
+    annual_metrics: Optional[FinancialMetrics] = None
 
 
 @dataclass

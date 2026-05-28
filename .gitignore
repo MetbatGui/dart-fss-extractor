@@ -178,3 +178,6 @@ pyrightconfig.json
 data/
 output/
 settings.json
+
+/scratch
+/scripts

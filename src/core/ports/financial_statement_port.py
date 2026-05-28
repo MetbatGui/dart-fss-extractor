@@ -12,6 +12,12 @@ from core.domain.models.financial_statement import (
 class FinancialStatementPort(ABC):
     """재무제표 조회 포트."""
 
+    @property
+    @abstractmethod
+    def call_count(self) -> int:
+        """현재 세션의 API 호출 횟수."""
+        raise NotImplementedError
+
     @abstractmethod
     def get_financial_statement(
         self,
