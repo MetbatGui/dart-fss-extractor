@@ -130,7 +130,7 @@ def test_parse_financial_statement_empty_list():
 def test_parse_date_info_cumulative():
     """누적 데이터 날짜 파싱 (1월 1일 시작)."""
     items = [{"thstrm_dt": "2023.01.01 ~ 2023.06.30"}]
-    start_date, end_date, is_cumulative = DartResponseParser._parse_date_info(items)
+    start_date, end_date, is_cumulative = DartResponseParser._parse_date_info(items, ReportType.SEMI_ANNUAL)
     
     assert start_date == date(2023, 1, 1)
     assert end_date == date(2023, 6, 30)
@@ -140,7 +140,7 @@ def test_parse_date_info_cumulative():
 def test_parse_date_info_separate():
     """별도 데이터 날짜 파싱 (1월 1일이 아닌 경우)."""
     items = [{"thstrm_dt": "2023.04.01 ~ 2023.06.30"}]
-    start_date, end_date, is_cumulative = DartResponseParser._parse_date_info(items)
+    start_date, end_date, is_cumulative = DartResponseParser._parse_date_info(items, ReportType.SEMI_ANNUAL)
     
     assert start_date == date(2023, 4, 1)
     assert end_date == date(2023, 6, 30)
@@ -150,8 +150,8 @@ def test_parse_date_info_separate():
 def test_parse_date_info_invalid_format():
     """날짜 형식이 잘못된 경우."""
     items = [{"thstrm_dt": "2023.01.01 - 2023.06.30"}] # ~ 대신 -
-    start_date, end_date, is_cumulative = DartResponseParser._parse_date_info(items)
+    start_date, end_date, is_cumulative = DartResponseParser._parse_date_info(items, ReportType.SEMI_ANNUAL)
     
     assert start_date is None
     assert end_date is None
-    assert is_cumulative is False
+    assert is_cumulative is True

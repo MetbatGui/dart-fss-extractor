@@ -162,6 +162,10 @@ class DartResponseParser:
                     is_cumulative = (start_date.month == 1 and start_date.day == 1)
                     return start_date, end_date, is_cumulative
             
+            # 범위 형식인데 잘못 구획된 형태(예: "2023.01.01 - 2023.06.30")에 대한 방어
+            if "-" in thstrm_dt and thstrm_dt.count(".") > 2:
+                raise ValueError("비정상적인 범위 형식 날짜 구조 감지")
+            
             # 단일 날짜인 경우 (예: "2023.09.30")
             # 일단 보고서 유형에 따른 기본값 유지 (DataProcessingService에서 지능적으로 최종 판단함)
             is_cumulative = is_cumulative or has_cumulative_keyword

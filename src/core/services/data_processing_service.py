@@ -2,7 +2,7 @@
 
 import re
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict
 from pathlib import Path
 import sys
 
@@ -188,12 +188,17 @@ class DataProcessingService:
         # 각 시점별 단독(분기) 실적 복원 및 차감 역산
         q1_final_single = q1_single
         
-        q2_final_single = semi_single if is_metrics_valid(semi_single) else self._calculate_diff(q2_final_cum, q1_final_cum)
-        q3_final_single = q3_single if is_metrics_valid(q3_single) else self._calculate_diff(q3_final_cum, q2_final_cum)
+        q2_final_single = FinancialMetrics(None, None, None)
+        if semi_stmt is not None:
+            q2_final_single = semi_single if is_metrics_valid(semi_single) else self._calculate_diff(q2_final_cum, q1_final_cum)
+            
+        q3_final_single = FinancialMetrics(None, None, None)
+        if q3_stmt is not None:
+            q3_final_single = q3_single if is_metrics_valid(q3_single) else self._calculate_diff(q3_final_cum, q2_final_cum)
         
         # 4분기: Annual 누적 - 3분기 누적
         q4_final_single = FinancialMetrics(None, None, None)
-        if ann_cum.revenue is not None and q3_final_cum.revenue is not None:
+        if annual_stmt is not None and ann_cum.revenue is not None and q3_final_cum.revenue is not None:
             q4_final_single = self._calculate_diff(ann_cum, q3_final_cum)
 
         # 3. 매출액 음수 방어 및 클렌징 로직 적용
@@ -434,3 +439,21 @@ class DataProcessingService:
                                 setattr(item, attr, str(new_val))
                             except (ValueError, TypeError):
                                 continue
+
+    def calculate_annual_from_quarters(self, metrics_by_quarter: Dict[str, FinancialMetrics]) -> FinancialMetrics:
+        """분기 실적 목록을 합산하여 연간 실적 산출."""
+        total_revenue = None
+        total_op = None
+        total_net = None
+        
+        for q in ["1Q", "2Q", "3Q", "4Q"]:
+            m = metrics_by_quarter.get(q)
+            if m:
+                if m.revenue is not None:
+                    total_revenue = (total_revenue or 0) + m.revenue
+                if m.operating_profit is not None:
+                    total_op = (total_op or 0) + m.operating_profit
+                if m.net_income is not None:
+                    total_net = (total_net or 0) + m.net_income
+        
+        return FinancialMetrics(revenue=total_revenue, operating_profit=total_op, net_income=total_net)

@@ -19,12 +19,16 @@ def service():
 def create_statement(revenue: str, op_profit: str, net_income: str, is_cumulative: bool = True) -> FinancialStatement:
     """테스트용 재무제표 생성 헬퍼."""
     accounts = []
+    add_rev = revenue if is_cumulative else None
+    add_op = op_profit if is_cumulative else None
+    add_net = net_income if is_cumulative else None
+
     if revenue:
-        accounts.append(AccountItem("매출액", revenue))
+        accounts.append(AccountItem("매출액", revenue, thstrm_add_amount=add_rev))
     if op_profit:
-        accounts.append(AccountItem("영업이익", op_profit))
+        accounts.append(AccountItem("영업이익", op_profit, thstrm_add_amount=add_op))
     if net_income:
-        accounts.append(AccountItem("당기순이익", net_income))
+        accounts.append(AccountItem("당기순이익", net_income, thstrm_add_amount=add_net))
         
     return FinancialStatement(
         corp_code="test",

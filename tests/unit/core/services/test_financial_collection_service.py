@@ -161,7 +161,7 @@ def test_retry_on_failure_history(
     mock_financial_port.get_financial_statement.return_value = Mock(spec=FinancialStatement)
     mock_processing_service.calculate_quarterly_performance.return_value = QuarterlyMetrics("RetryCorp")
 
-    service.collect_and_save(company_names, 2023, 2023, "test.xlsx")
+    service.collect_and_save(company_names, 2023, 2023, "test.xlsx", skip_failed=False)
 
     # 재시도 수행 확인 (데이터 조회 호출됨)
     mock_financial_port.get_financial_statement.assert_called()

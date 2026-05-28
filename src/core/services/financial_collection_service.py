@@ -200,6 +200,44 @@ class FinancialCollectionService:
             if company.failed_years:
                 logger.warning(f"[{idx}/{total_companies}] {name} 일부 실패: {company.failed_years}")
 
+        # 5. 수집 완료 후 전체 데이터 통합하여 엑셀 내보내기
+        try:
+            logger.info("모든 기업 수집 완료. 통합 엑셀 파일 생성 중...")
+            all_df = self._repository_port.load_all(dataset_name)
+            if not all_df.empty:
+                final_dfs = {}
+                DIVISOR = 1_000_000  # 백만 원 단위
+                
+                # 분기 데이터 피벗
+                df_quarter = all_df[all_df["구분"] == "분기"].copy()
+                if not df_quarter.empty:
+                    # '기간' 컬럼이 없는 기존 수집 데이터 호환 가드
+                    if "기간" not in df_quarter.columns:
+                        df_quarter["기간"] = df_quarter["연도"].astype(int).astype(str) + "." + df_quarter["분기"].astype(str)
+                    df_quarter = df_quarter.drop_duplicates(subset=["기업명", "기간"])
+                    final_dfs["매출액_분기"] = df_quarter.pivot(index=["기업명"], columns="기간", values="매출액")
+                    final_dfs["영업이익_분기"] = df_quarter.pivot(index=["기업명"], columns="기간", values="영업이익")
+                    final_dfs["당기순이익_분기"] = df_quarter.pivot(index=["기업명"], columns="기간", values="당기순이익")
+                
+                # 연간 데이터 피벗
+                df_annual = all_df[all_df["구분"] == "연간"].copy()
+                if not df_annual.empty:
+                    df_annual = df_annual.drop_duplicates(subset=["기업명", "연도"])
+                    final_dfs["매출액_연간"] = df_annual.pivot(index=["기업명"], columns="연도", values="매출액")
+                    final_dfs["영업이익_연간"] = df_annual.pivot(index=["기업명"], columns="연도", values="영업이익")
+                    final_dfs["당기순이익_연간"] = df_annual.pivot(index=["기업명"], columns="연도", values="당기순이익")
+                
+                # 단위 변환
+                for sheet_name, sheet_df in final_dfs.items():
+                    final_dfs[sheet_name] = (sheet_df.apply(pd.to_numeric, errors='coerce') / DIVISOR).round(0)
+                
+                self._export_port.export_excel(final_dfs, output_path)
+                logger.info(f"성공적으로 통합 엑셀 파일을 저장했습니다: {output_path}")
+            else:
+                logger.warning("저장소에 수집된 데이터가 없어 엑셀 생성을 건너뜁니다.")
+        except Exception as e:
+            logger.error(f"통합 엑셀 파일 생성 중 오류 발생: {e}")
+
     def rebuild_full_repository(
         self,
         company_list: List[Dict[str, str]],
