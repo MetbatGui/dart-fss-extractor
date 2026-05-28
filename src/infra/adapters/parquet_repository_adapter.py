@@ -19,9 +19,18 @@ class ParquetRepositoryAdapter(RepositoryPort):
     def save_dataframe(self, key: str, df: pd.DataFrame) -> None:
         """DataFrame을 Parquet로 저장."""
         file_path = self._get_file_path(key)
-        # engine='pyarrow' 권장 (설치 필요, 없으면 fastparquet 등 사용)
-        # 여기서는 기본적으로 pandas가 설치된 엔진을 사용
-        df.to_parquet(file_path, index=True)
+        temp_path = file_path.with_suffix(".tmp")
+        try:
+            df.to_parquet(temp_path, index=True)
+            import os
+            os.replace(temp_path, file_path)
+        except Exception as e:
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except Exception:
+                    pass
+            raise e
 
     def load_dataframe(self, key: str) -> Optional[pd.DataFrame]:
         """Parquet 파일 로드."""
@@ -38,7 +47,18 @@ class ParquetRepositoryAdapter(RepositoryPort):
         dataset_dir.mkdir(parents=True, exist_ok=True)
 
         file_path = dataset_dir / f"{partition_name}.parquet"
-        df.to_parquet(file_path, index=True)
+        temp_path = file_path.with_suffix(".tmp")
+        try:
+            df.to_parquet(temp_path, index=True)
+            import os
+            os.replace(temp_path, file_path)
+        except Exception as e:
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except Exception:
+                    pass
+            raise e
 
     def exists(self, dataset_name: str, partition_name: str) -> bool:
         """파티션 존재 여부 확인."""
@@ -81,8 +101,19 @@ class ParquetRepositoryAdapter(RepositoryPort):
         dataset_dir.mkdir(parents=True, exist_ok=True)
 
         file_path = dataset_dir / f"{company.code}_meta.json"
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(company.to_dict(), f, ensure_ascii=False, indent=2)
+        temp_path = file_path.with_suffix(".tmp")
+        try:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(company.to_dict(), f, ensure_ascii=False, indent=2)
+            import os
+            os.replace(temp_path, file_path)
+        except Exception as e:
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except Exception:
+                    pass
+            raise e
 
     def load_company_metadata(self, code: str) -> Optional[Company]:
         """기업 메타데이터 로드."""
