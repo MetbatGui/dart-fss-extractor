@@ -2,8 +2,7 @@
 
 import re
 import logging
-from decimal import Decimal
-from typing import List, Optional, Dict
+from typing import List, Optional
 from pathlib import Path
 import sys
 
@@ -65,6 +64,20 @@ class DataProcessingService:
         # 0. 공시 자릿수(스케일) 불일치 자동 정규화 가드 적용
         self._normalize_statement_scales(q1_stmt, semi_stmt, q3_stmt, annual_stmt)
         
+        # 0-1. 도메인 모델에 누적금액(thstrm_add_amount)이 물리적으로 존재하여 파싱되었는지 판별하는 헬퍼
+        def check_has_add(stmt: Optional[FinancialStatement]) -> bool:
+            if not stmt or not stmt.accounts:
+                return False
+            all_keywords = self.REVENUE_KEYWORDS + self.OP_PROFIT_KEYWORDS + self.NET_INCOME_KEYWORDS
+            for item in stmt.accounts:
+                if item.account_nm.strip() in all_keywords:
+                    if hasattr(item, "thstrm_add_amount") and item.thstrm_add_amount and item.thstrm_add_amount.strip() not in ["", "-"]:
+                        return True
+            return False
+
+        has_q2_add = check_has_add(semi_stmt)
+        has_q3_add = check_has_add(q3_stmt)
+
         # 1. 분기별 연결재무제표(CFS) 존재 여부 동적 체크
         has_cfs_by_report = {}
         for r_key, stmt in [("1Q", q1_stmt), ("2Q", semi_stmt), ("3Q", q3_stmt), ("Annual", annual_stmt)]:
@@ -114,58 +127,71 @@ class DataProcessingService:
 
         ann_cum = get_valid_m(annual_stmt, "Annual", use_cumulative=True)
 
-        # 2. 독립적 분기 실적 매핑 및 역산 (초정밀 하이브리드 계산 엔진)
+        # 2. 독립적 분기 실적 매핑 및 순차 누적 (현분기 누적 다이렉트 차감 및 상호 결측 복원 알고리즘 적용)
         corp_name = self._extract_corp_name([q1_stmt, semi_stmt, q3_stmt, annual_stmt])
         
-        # 1분기는 단독이 곧 누적
+        def is_metrics_valid(m: FinancialMetrics) -> bool:
+            return m.revenue is not None or m.operating_profit is not None or m.net_income is not None
+
+        def resolve_cumulative(stmt_cum: FinancialMetrics, stmt_single: FinancialMetrics, fallback_cum: FinancialMetrics, has_add: bool) -> FinancialMetrics:
+            if not has_add:
+                # 물리적인 누적 데이터가 도메인 레벨에 없었다면, fallback_cum(순차 누적 합산)을 무조건적으로 우선 신뢰하여 사용
+                return fallback_cum
+            
+            if is_metrics_valid(stmt_cum):
+                # 가짜 누적(Fake Cumulative) 감지 가드:
+                # 단독 실적과 누적 실적이 1원도 안 틀리고 완벽히 일치한다면, 누적 필드 결측으로 간주하고 fallback_cum(순차 누적 합산)을 차용합니다.
+                if (stmt_cum.revenue == stmt_single.revenue and 
+                    stmt_cum.operating_profit == stmt_single.operating_profit and 
+                    stmt_cum.net_income == stmt_single.net_income):
+                    return fallback_cum
+                return stmt_cum
+            return fallback_cum
+
+        # 각 시점별 누적치(현분기 누적) 결정
         q1_final_cum = q1_cum
+        
+        # 2분기 가짜 단독 공시 오염 검사 (이전 누계 대조식 가드):
+        # 2Q 누적액이 도메인에 명시적으로 존재(has_q2_add)하고, 1Q 누적액이 존재하고 0보다 크며, 
+        # 2Q 단독과 2Q 누적이 완벽히 같으면서, 2Q 단독 수치가 1Q 누적보다 크다면 ➔ 2Q 단독은 사실 2Q 누계임이 확실합니다.
+        is_fake_2q = False
+        if (has_q2_add and
+            q1_final_cum.revenue is not None and q1_final_cum.revenue > 0 and 
+            semi_single.revenue is not None and semi_single.revenue == semi_cum.revenue and 
+            semi_single.revenue > q1_final_cum.revenue):
+            is_fake_2q = True
+
+        if is_fake_2q:
+            logger.info(f"[{corp_name} 2Q] 이전 누계 대조식 가드로 가짜 단독(누적 오염)을 감지했습니다. 차감 복원합니다.")
+            semi_cum = semi_single
+            semi_single = FinancialMetrics(None, None, None)
+
+        q2_final_cum = resolve_cumulative(semi_cum, semi_single, self._add_metrics(q1_final_cum, semi_single), has_q2_add)
+
+        # 3분기 가짜 단독 공시 오염 검사 (이전 누계 대조식 가드):
+        # 3Q 누적액이 도메인에 명시적으로 존재(has_q3_add)하고, 2Q 누적액이 존재하고 0보다 크며, 
+        # 3Q 단독과 3Q 누적이 완벽히 같으면서, 3Q 단독 수치가 2Q 누적보다 크다면 ➔ 3Q 단독은 사실 3Q 누계임이 확실합니다.
+        is_fake_3q = False
+        if (has_q3_add and
+            q2_final_cum.revenue is not None and q2_final_cum.revenue > 0 and 
+            q3_single.revenue is not None and q3_single.revenue == q3_cum.revenue and 
+            q3_single.revenue > q2_final_cum.revenue):
+            is_fake_3q = True
+
+        if is_fake_3q:
+            logger.info(f"[{corp_name} 3Q] 이전 누계 대조식 가드로 가짜 단독(누적 오염)을 감지했습니다. 차감 복원합니다.")
+            q3_cum = q3_single
+            q3_single = FinancialMetrics(None, None, None)
+
+        q3_final_cum = resolve_cumulative(q3_cum, q3_single, self._add_metrics(q2_final_cum, q3_single), has_q3_add)
+
+        # 각 시점별 단독(분기) 실적 복원 및 차감 역산
         q1_final_single = q1_single
-
-        # 2분기 계산
-        q2_final_single = FinancialMetrics(None, None, None)
-        q2_final_cum = q1_final_cum
         
-        if semi_stmt:
-            # 누적 여부 지능적 판정:
-            # 1) semi_stmt.is_cumulative 가 True 이거나
-            # 2) 추출된 2Q 누적 매출액이 존재하고, 1Q 누적 매출액보다 크거나 같다면 -> 누적 공시가 확실함
-            is_cum = False
-            if getattr(semi_stmt, "is_cumulative", False):
-                is_cum = True
-            elif semi_cum.revenue is not None and q1_final_cum.revenue is not None:
-                if semi_cum.revenue >= q1_final_cum.revenue:
-                    is_cum = True
-            
-            if is_cum:
-                q2_final_cum = semi_cum
-                q2_final_single = self._calculate_diff(q2_final_cum, q1_final_cum)
-            else:
-                q2_final_single = semi_single
-                q2_final_cum = self._add_metrics(q1_final_cum, q2_final_single)
+        q2_final_single = semi_single if is_metrics_valid(semi_single) else self._calculate_diff(q2_final_cum, q1_final_cum)
+        q3_final_single = q3_single if is_metrics_valid(q3_single) else self._calculate_diff(q3_final_cum, q2_final_cum)
         
-        # 3분기 계산
-        q3_final_single = FinancialMetrics(None, None, None)
-        q3_final_cum = q2_final_cum
-        
-        if q3_stmt:
-            # 누적 여부 지능적 판정:
-            # 1) q3_stmt.is_cumulative 가 True 이거나
-            # 2) 추출된 3Q 누적 매출액이 존재하고, 2Q 누적 매출액보다 크거나 같다면 -> 누적 공시가 확실함
-            is_cum = False
-            if getattr(q3_stmt, "is_cumulative", False):
-                is_cum = True
-            elif q3_cum.revenue is not None and q2_final_cum.revenue is not None:
-                if q3_cum.revenue >= q2_final_cum.revenue:
-                    is_cum = True
-            
-            if is_cum:
-                q3_final_cum = q3_cum
-                q3_final_single = self._calculate_diff(q3_final_cum, q2_final_cum)
-            else:
-                q3_final_single = q3_single
-                q3_final_cum = self._add_metrics(q2_final_cum, q3_final_single)
-
-        # 4분기 계산: Annual 누적 - Q3 누적 (DART API에서 단독 4Q를 주지 않으므로 항상 역산)
+        # 4분기: Annual 누적 - 3분기 누적
         q4_final_single = FinancialMetrics(None, None, None)
         if ann_cum.revenue is not None and q3_final_cum.revenue is not None:
             q4_final_single = self._calculate_diff(ann_cum, q3_final_cum)
@@ -223,6 +249,43 @@ class DataProcessingService:
                         break  # 레퍼런스 값 하나를 확보하면 즉시 종료
                     except (ValueError, TypeError):
                         continue
+
+        # [지능형 분할 매출 합산 가드]
+        # keywords가 매출액 계정군이고, 통합 매출 계정이 없는 특수 공시 양식인 경우 세부 분할 계정(수출/내수)을 자동 합산
+        is_revenue_search = any(kw in ["매출액", "영업수익", "매출"] for kw in keywords)
+        if is_revenue_search:
+            has_integrated_revenue = False
+            for item in accounts:
+                sj_div = getattr(item, "sj_div", None)
+                if sj_div and sj_div.strip().upper() == "BS":
+                    continue
+                if item.account_nm.strip() in ["매출액", "영업수익", "매출"]:
+                    has_integrated_revenue = True
+                    break
+            
+            if not has_integrated_revenue:
+                export_val = None
+                domestic_val = None
+                for item in accounts:
+                    sj_div = getattr(item, "sj_div", None)
+                    if sj_div and sj_div.strip().upper() == "BS":
+                        continue
+                    nm = item.account_nm.strip()
+                    val_str = item.thstrm_add_amount if use_cumulative and hasattr(item, "thstrm_add_amount") and item.thstrm_add_amount else item.thstrm_amount
+                    if not val_str or val_str.strip() in ["", "-"]:
+                        continue
+                    try:
+                        val = int(re.sub(r'[^0-9-]', '', val_str))
+                        if "수출" in nm:
+                            export_val = val
+                        elif "내수" in nm:
+                            domestic_val = val
+                    except (ValueError, TypeError):
+                        continue
+                
+                if export_val is not None and domestic_val is not None:
+                    logger.info(f"[CORE ENGINE GUARDIAN] 분할 매출 계정 감지 및 합산 처리 완료: 수출({export_val}) + 내수({domestic_val}) = {export_val + domestic_val}")
+                    return export_val + domestic_val
 
         # 1. 완전 일치 우선순위 탐색 (키워드 순서 준수)
         for kw in keywords:

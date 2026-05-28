@@ -1,15 +1,10 @@
-import os
-import sys
 import logging
 import shutil
 from pathlib import Path
 import pandas as pd
 from tqdm import tqdm
 
-# src 디렉토리를 모듈 검색 경로에 추가
-sys.path.append(str(Path(__file__).parent / "src"))
 
-from infra.adapters.parquet_repository_adapter import ParquetRepositoryAdapter
 from infra.adapters.excel_export_adapter import ExcelExportAdapter
 
 # 로깅 설정

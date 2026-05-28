@@ -15,6 +15,11 @@ dependencies = [
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
+[project.scripts]
+dart-extractor = "main:main"
+dart-export-excel = "export_v2_excel:export_v2_integrated"
+dart-update-missing = "update_missing_data:main"
+
 [tool.setuptools.packages.find]
 # src 디렉터리 하위의 모든 패키지를 자동으로 찾도록 설정
 where = ["src"]

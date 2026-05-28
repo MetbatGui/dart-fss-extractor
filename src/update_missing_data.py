@@ -4,11 +4,8 @@ import argparse
 import logging
 import sys
 import os
-from pathlib import Path
 from dotenv import load_dotenv
 
-# src 디렉토리를 모듈 검색 경로에 추가
-sys.path.append(str(Path(__file__).parent))
 
 from core.services.incremental_update_service import IncrementalUpdateService
 from infra.adapters.local_file_reader_adapter import LocalFileReaderAdapter

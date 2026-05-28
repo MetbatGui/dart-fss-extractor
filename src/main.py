@@ -7,8 +7,6 @@ import pandas as pd
 from pathlib import Path
 from dotenv import load_dotenv
 
-# src 디렉토리를 모듈 검색 경로에 추가
-sys.path.append(str(Path(__file__).parent))
 
 from core.services.financial_collection_service import FinancialCollectionService
 from core.services.data_processing_service import DataProcessingService

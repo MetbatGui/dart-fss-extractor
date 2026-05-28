@@ -4,7 +4,7 @@ import logging
 import shutil
 import time
 from datetime import datetime
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict
 import pandas as pd
 
 from core.ports.file_reader_port import FileReaderPort
