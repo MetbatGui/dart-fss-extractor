@@ -2,10 +2,13 @@
 
 import json
 import os
+import logging
 from datetime import datetime, date
 from pathlib import Path
 from typing import Optional, Dict
 import requests
+
+logger = logging.getLogger(__name__)
 
 from core.domain.models.financial_statement import (
     AccountItem,
