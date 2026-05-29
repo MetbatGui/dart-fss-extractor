@@ -38,3 +38,22 @@ class FinancialStatementPort(ABC):
             재무제표 or None
         """
         raise NotImplementedError
+
+    @abstractmethod
+    def get_disclosures(
+        self,
+        bgn_de: str,
+        end_de: str,
+        pblntf_ty: str = "A"
+    ) -> list[dict]:
+        """지정된 날짜 범위의 공시 목록 조회.
+        
+        Args:
+            bgn_de: 시작일자 (YYYYMMDD)
+            end_de: 종료일자 (YYYYMMDD)
+            pblntf_ty: 공시유형 (기본값: 'A' - 정기공시)
+            
+        Returns:
+            공시 목록 list of dict
+        """
+        raise NotImplementedError

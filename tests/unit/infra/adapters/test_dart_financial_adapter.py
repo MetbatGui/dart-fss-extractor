@@ -129,3 +129,63 @@ def test_api_error_handling(adapter):
         statement = adapter.get_financial_statement("00126380", 2023, ReportType.ANNUAL)
         
     assert statement is None
+
+
+def test_get_disclosures_success(adapter):
+    """공시 검색 API 정상 조회 및 결과 매핑 테스트."""
+    mock_list_response = {
+        "status": "000",
+        "message": "정상",
+        "total_page": "1",
+        "list": [
+            {
+                "corp_code": "00126380",
+                "corp_name": "삼성전자",
+                "stock_code": "005930",
+                "report_nm": "분기보고서 (2026.03)",
+                "rcept_no": "20260515000123",
+                "rm": ""
+            }
+        ]
+    }
+
+    with patch("requests.get") as mock_get:
+        mock_response = MagicMock()
+        mock_response.json.return_value = mock_list_response
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        disclosures = adapter.get_disclosures("20260515", "20260515")
+
+    assert len(disclosures) == 1
+    assert disclosures[0]["corp_name"] == "삼성전자"
+    assert disclosures[0]["report_nm"] == "분기보고서 (2026.03)"
+
+
+def test_get_disclosures_pagination(adapter):
+    """공시 목록 조회 시 2페이지 이상 다중 페이지네이션 작동 테스트."""
+    # 1페이지 응답 모사
+    page1_response = {
+        "status": "000",
+        "total_page": "2",
+        "list": [{"corp_name": "삼성전자", "report_nm": "1페이지보고서"}]
+    }
+    # 2페이지 응답 모사
+    page2_response = {
+        "status": "000",
+        "total_page": "2",
+        "list": [{"corp_name": "현대자동차", "report_nm": "2페이지보고서"}]
+    }
+
+    with patch("requests.get") as mock_get:
+        mock_get.side_effect = [
+            MagicMock(json=lambda: page1_response, raise_for_status=lambda: None),
+            MagicMock(json=lambda: page2_response, raise_for_status=lambda: None),
+        ]
+
+        disclosures = adapter.get_disclosures("20260515", "20260515")
+
+    assert len(disclosures) == 2
+    assert disclosures[0]["report_nm"] == "1페이지보고서"
+    assert disclosures[1]["report_nm"] == "2페이지보고서"
+

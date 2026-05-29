@@ -366,3 +366,50 @@ class DartFinancialAdapter(FinancialStatementPort):
             )
         except (json.JSONDecodeError, KeyError, ValueError):
             return None
+
+    def get_disclosures(
+        self,
+        bgn_de: str,
+        end_de: str,
+        pblntf_ty: str = "A"
+    ) -> list[dict]:
+        """지정된 날짜 범위의 정기 공시 목록 조회 (페이지네이션 지원)."""
+        list_url = "https://opendart.fss.or.kr/api/list.json"
+        all_disclosures = []
+        page_no = 1
+        page_count = 100
+
+        while True:
+            params = {
+                "crtfc_key": self._api_key,
+                "bgn_de": bgn_de,
+                "end_de": end_de,
+                "pblntf_ty": pblntf_ty,
+                "page_no": str(page_no),
+                "page_count": str(page_count)
+            }
+            try:
+                self._call_count += 1
+                response = requests.get(list_url, params=params, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+                
+                status = data.get("status")
+                if status == "013":  # 데이터 없음
+                    break
+                if status != "000":  # 기타 에러
+                    logger.error(f"DART 공시목록 조회 에러: {data.get('message')}")
+                    break
+                
+                disclosures = data.get("list", [])
+                all_disclosures.extend(disclosures)
+                
+                total_page = int(data.get("total_page", 1))
+                if page_no >= total_page:
+                    break
+                page_no += 1
+            except Exception as e:
+                logger.error(f"DART 공시목록 API 호출 실패: {e}")
+                break
+
+        return all_disclosures
