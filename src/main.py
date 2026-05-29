@@ -12,7 +12,7 @@ from core.services.financial_collection_service import FinancialCollectionServic
 from core.services.data_processing_service import DataProcessingService
 from infra.adapters.dart_financial_adapter import DartFinancialAdapter
 from infra.adapters.corp_code_adapter import CorpCodeAdapter
-from infra.adapters.parquet_repository_adapter import ParquetRepositoryAdapter
+from infra.adapters.sqlite.sqlite_repository_adapter import SqliteRepositoryAdapter
 from infra.adapters.excel_export_adapter import ExcelExportAdapter
 
 # 로깅 설정
@@ -64,7 +64,7 @@ def main():
     # 어댑터 초기화
     corp_code_adapter = CorpCodeAdapter()
     financial_adapter = DartFinancialAdapter(api_key=api_key, use_cache=True)
-    repository_adapter = ParquetRepositoryAdapter()
+    repository_adapter = SqliteRepositoryAdapter()  # SQLite 마스터 저장소 병합 적용
     export_adapter = ExcelExportAdapter()
     processing_service = DataProcessingService(keywords_config=keywords_config)
 
