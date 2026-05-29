@@ -79,10 +79,30 @@ class CorpCodeAdapter(CorpCodePort):
              raise ValueError(f"압축 해제된 XML 파일 크기가 너무 작습니다 ({self._XML_PATH.stat().st_size} bytes).")
 
     def _load_mapping(self, only_listed: bool = False) -> Mapping[str, str]:
-        """XML 파일을 파싱해 ``{기업명: 기업코드}`` 사전을 만든다."""
+        """XML 파일을 파싱해 ``{기업명: 기업코드}`` 사전을 만든다.
+        
+        단, 로컬 매핑 데이터인 'data/corps.csv'가 존재하는 경우 정합성을 위해 
+        이를 우선적으로 로드하여 사명 매칭 불일치를 원천 방어합니다.
+        """
+        csv_path = Path("data/corps.csv")
+        if csv_path.is_file():
+            mapping: dict[str, str] = {}
+            try:
+                with csv_path.open("r", encoding="utf-8") as f:
+                    for line in f:
+                        parts = line.strip().split(",")
+                        if len(parts) == 2:
+                            name, code = parts
+                            mapping[name.strip()] = code.strip()
+                if mapping:
+                    return mapping
+            except Exception as e:
+                # 에러 시 원래 DART XML 파싱으로 Fallback
+                pass
+
         tree = ET.parse(self._XML_PATH)
         root = tree.getroot()
-        mapping: dict[str, str] = {}
+        mapping = {}
         for corp in root.findall("./list"):
             name = corp.findtext("corp_name")
             code = corp.findtext("corp_code")
@@ -90,7 +110,6 @@ class CorpCodeAdapter(CorpCodePort):
             
             if name and code:
                 if only_listed:
-                    # stock_code가 있고 공백이 아니면 상장사로 간주
                     if stock_code and stock_code.strip():
                         mapping[name] = code
                 else:
