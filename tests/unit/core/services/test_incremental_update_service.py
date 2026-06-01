@@ -119,3 +119,52 @@ def test_merge_quarterly_data_sorting(service):
     cols = merged["매출액_분기별"].columns.tolist()
     
     assert cols == ["2023.1Q", "2023.2Q"]
+
+
+def test_update_missing_quarters_success(service, mock_file_reader, mock_corp_code_port, mock_financial_port, mock_export_port, mock_processing_service):
+    """지정 분기 누락 시 정상적으로 수집 및 병합, 저장을 수행하는지 검증."""
+    existing_df = pd.DataFrame({"2023.1Q": [100, None]}, index=["A", "B"])
+    mock_file_reader.read_excel_with_sheets.return_value = {"매출액_분기별": existing_df}
+    
+    mock_corp_code_port.get_code.return_value = "000002"
+    mock_financial_port.get_financial_statement.return_value = None
+    
+    from unittest.mock import MagicMock
+    metrics_mock = MagicMock()
+    metrics_mock.metrics_by_quarter = {
+        "1Q": MagicMock(revenue=100, operating_profit=10, net_income=5),
+        "2Q": MagicMock(revenue=150, operating_profit=15, net_income=7),
+        "3Q": MagicMock(revenue=200, operating_profit=20, net_income=10),
+        "4Q": MagicMock(revenue=250, operating_profit=25, net_income=12),
+    }
+    mock_processing_service.calculate_quarterly_performance.return_value = metrics_mock
+    
+    service.update_missing_quarters("test.xlsx", 2023, 1, auto_backup=False)
+    
+    mock_corp_code_port.get_code.assert_called_with("B")
+    assert mock_export_port.export_excel.called
+
+
+def test_update_missing_quarters_api_limit(service, mock_file_reader, mock_corp_code_port, mock_financial_port, mock_export_port, mock_processing_service):
+    """API 호출 제한에 도달하면 즉시 중단하고 그때까지의 결과만 저장해야 함."""
+    service._max_api_calls = 2
+    service._current_api_calls = 0
+    
+    existing_df = pd.DataFrame({"2023.1Q": [None, None]}, index=["A", "B"])
+    mock_file_reader.read_excel_with_sheets.return_value = {"매출액_분기별": existing_df}
+    mock_corp_code_port.get_code.return_value = "000001"
+    
+    from unittest.mock import MagicMock
+    metrics_mock = MagicMock()
+    metrics_mock.metrics_by_quarter = {
+        "1Q": MagicMock(revenue=100, operating_profit=10, net_income=5),
+        "2Q": MagicMock(revenue=150, operating_profit=15, net_income=7),
+        "3Q": MagicMock(revenue=200, operating_profit=20, net_income=10),
+        "4Q": MagicMock(revenue=250, operating_profit=25, net_income=12),
+    }
+    mock_processing_service.calculate_quarterly_performance.return_value = metrics_mock
+    
+    service.update_missing_quarters("test.xlsx", 2023, 1, auto_backup=False)
+    
+    assert mock_corp_code_port.get_code.call_count == 1
+    mock_corp_code_port.get_code.assert_called_with("A")

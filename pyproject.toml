@@ -23,3 +23,24 @@ dart-update-missing = "update_missing_data:main"
 [tool.setuptools.packages.find]
 # src 디렉터리 하위의 모든 패키지를 자동으로 찾도록 설정
 where = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "src/daily_scheduler.py",
+    "src/export_v2_excel.py",
+    "src/main.py",
+    "src/update_missing_data.py",
+]
+
+[tool.coverage.report]
+show_missing = true
