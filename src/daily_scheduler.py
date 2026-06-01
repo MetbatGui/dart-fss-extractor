@@ -110,7 +110,7 @@ def main():
     )
 
     # 1. 당일 공시 스캔 및 증분 적재 수행 (SQLite 트랜잭션 수호)
-    result = daily_service.collect_daily_disclosures(
+    daily_service.collect_daily_disclosures(
         target_company_names=company_names,
         start_date=bgn_de,
         end_date=end_de

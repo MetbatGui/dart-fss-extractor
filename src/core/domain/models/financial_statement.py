@@ -1,9 +1,9 @@
 """재무제표 도메인 모델 - 풍부한 도메인 모델(Rich Domain Model) 구현."""
 
-import re
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, date
+from decimal import Decimal
 from enum import Enum
 from typing import List, Optional, Union
 

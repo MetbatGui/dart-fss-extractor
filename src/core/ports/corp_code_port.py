@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Mapping, Optional, Sequence
+from typing import Optional, Sequence
 
 
 class CorpCodePort(ABC):
@@ -9,24 +9,6 @@ class CorpCodePort(ABC):
     이 인터페이스를 구현한다. 이를 통해 도메인(서비스)은 어댑터의
     구체적인 동작을 알 필요가 없으며, 의존성 역전 원칙을 만족한다.
     """
-
-    @abstractmethod
-    def get_all_mapping(self) -> Mapping[str, str]:
-        """전체 기업명‑코드 매핑을 반환한다.
-
-        Returns:
-            Mapping[str, str]: {기업명: 기업코드} 형태의 사전.
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    def get_listed_companies(self) -> Mapping[str, str]:
-        """상장사(종목코드가 있는 기업)명-코드 매핑을 반환한다.
-
-        Returns:
-            Mapping[str, str]: {기업명: 기업코드} 형태의 사전.
-        """
-        raise NotImplementedError
 
     @abstractmethod
     def get_code(self, company_name: str) -> Optional[str]:

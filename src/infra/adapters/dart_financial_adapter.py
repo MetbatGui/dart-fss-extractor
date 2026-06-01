@@ -8,8 +8,6 @@ from pathlib import Path
 from typing import Optional, Dict
 import requests
 
-logger = logging.getLogger(__name__)
-
 from core.domain.models.financial_statement import (
     AccountItem,
     FinancialStatement,
@@ -18,6 +16,8 @@ from core.domain.models.financial_statement import (
 )
 from core.ports.financial_statement_port import FinancialStatementPort
 from infra.adapters.dart_response_parser import DartResponseParser
+
+logger = logging.getLogger(__name__)
 
 
 class DartFinancialAdapter(FinancialStatementPort):
@@ -114,55 +114,6 @@ class DartFinancialAdapter(FinancialStatementPort):
         
         return results
 
-    def _check_cache(
-        self,
-        corp_code: str,
-        year: int,
-        report_type: ReportType,
-        prefer_consolidated: bool
-    ) -> Optional[FinancialStatement]:
-        """캐시에서 재무제표 조회.
-        
-        우선순위에 따라 연결 → 개별 또는 개별 → 연결 순서로 확인합니다.
-        """
-        if not self._use_cache:
-            return None
-        
-        fs_types = self._get_fs_type_priority(prefer_consolidated)
-        
-        for fs_type in fs_types:
-            cached = self._load_from_cache(corp_code, year, report_type, fs_type)
-            if cached:
-                # 데이터가 있거나, '데이터 없음'으로 캐시된 경우 모두 반환
-                return cached
-        
-        return None
-
-    def _fetch_with_fallback(
-        self,
-        corp_code: str,
-        year: int,
-        report_type: ReportType,
-        prefer_consolidated: bool
-    ) -> Optional[FinancialStatement]:
-        """API 호출 (fallback 포함).
-        
-        우선순위에 따라 조회하고, 실패 시 대안으로 fallback합니다.
-        """
-        fs_types = self._get_fs_type_priority(prefer_consolidated)
-        
-        for fs_type in fs_types:
-            result = self._fetch_from_api(corp_code, year, report_type, fs_type)
-            if result == self._NO_DATA_MARKER:
-                self._save_negative_cache(corp_code, year, report_type, fs_type)
-                continue
-                
-            if result:
-                self._save_to_cache(result)
-                return result
-        
-        return None
-    
     def _get_fs_type_priority(self, prefer_consolidated: bool) -> list[FinancialStatementType]:
         """재무제표 종류 우선순위 반환.
         
@@ -176,39 +127,6 @@ class DartFinancialAdapter(FinancialStatementPort):
             return [FinancialStatementType.CONSOLIDATED, FinancialStatementType.SEPARATE]
         return [FinancialStatementType.SEPARATE, FinancialStatementType.CONSOLIDATED]
 
-    def _fetch_from_api(
-        self,
-        corp_code: str,
-        year: int,
-        report_type: ReportType,
-        fs_type: FinancialStatementType
-    ) -> Optional[FinancialStatement]:
-        """DART API 호출 및 파싱.
-        
-        API 호출과 응답 파싱을 DartResponseParser에 위임합니다.
-        """
-        params = self._build_api_params(corp_code, year, report_type, fs_type)
-        
-        try:
-            response = requests.get(self._API_URL, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            
-            # 실제 API 호출이 발생했으므로 카운트 증가
-            self._call_count += 1
-            
-            status = data.get("status")
-            if status == "013":
-                return self._NO_DATA_MARKER
-                
-            # 파싱 로직을 DartResponseParser에 위임
-            return DartResponseParser.parse_financial_statement(
-                data, corp_code, year, report_type, fs_type
-            )
-        
-        except (requests.RequestException, json.JSONDecodeError, KeyError):
-            return None
-    
     def _save_negative_cache(
         self, 
         corp_code: str, 
@@ -302,10 +220,10 @@ class DartFinancialAdapter(FinancialStatementPort):
             "accounts": [
                 {
                     "account_nm": acc.account_nm,
-                    "thstrm_amount": acc.thstrm_amount,
-                    "thstrm_add_amount": acc.thstrm_add_amount,
-                    "thstrm_nm": acc.thstrm_nm,
-                    "sj_div": getattr(acc, "sj_div", None)
+                    "thstrm_amount": str(acc.amount),
+                    "thstrm_add_amount": str(acc.cumulative_amount),
+                    "thstrm_nm": acc.period_name,
+                    "sj_div": acc.statement_type
                 }
                 for acc in statement.accounts
             ],

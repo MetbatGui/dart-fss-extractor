@@ -240,8 +240,3 @@ class QuarterlyMetrics:
         return total
 
 
-@dataclass
-class AnnualMetrics:
-    """기업의 연간 재무 지표 엔티티."""
-    corp_name: str
-    metrics_by_year: Dict[int, FinancialMetrics] = field(default_factory=dict)

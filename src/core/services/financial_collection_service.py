@@ -1,18 +1,15 @@
 """재무 데이터 수집 총괄 서비스."""
 
-import json
 import time
 import logging
-from pathlib import Path
 from typing import List, Dict
-from datetime import datetime
 import pandas as pd
 
 from core.ports.corp_code_port import CorpCodePort
 from core.ports.financial_statement_port import FinancialStatementPort
 from core.ports.repository_port import RepositoryPort
 from core.ports.export_port import ExportPort
-from core.domain.models.financial_statement import ReportType, FinancialStatementType
+from core.domain.models.financial_statement import ReportType
 from core.services.data_processing_service import DataProcessingService
 from core.domain.models.performance_metrics import QuarterlyMetrics
 from core.domain.models.company import Company
@@ -237,181 +234,6 @@ class FinancialCollectionService:
                 logger.warning("저장소에 수집된 데이터가 없어 엑셀 생성을 건너뜁니다.")
         except Exception as e:
             logger.error(f"통합 엑셀 파일 생성 중 오류 발생: {e}")
-
-    def rebuild_full_repository(
-        self,
-        company_list: List[Dict[str, str]],
-        start_year: int,
-        end_year: int,
-        output_path: str,
-        max_api_calls: int = 5000,
-        progress_path: str = "data/collection_progress.json"
-    ) -> None:
-        """처음부터 다시 모든 데이터를 수집하여 저장소를 재구축합니다.
-        
-        - 5000건 호출 시 자동 정지
-        - 체크포인트 기반 이어하기 지원
-        - 상세 로깅 (다음 기업 안내 등)
-        """
-        
-        progress_file = Path(progress_path)
-        if progress_file.exists():
-            try:
-                with open(progress_file, "r", encoding="utf-8") as f:
-                    content = f.read().strip()
-                    if content:
-                        progress_data = json.loads(content)
-                        completed_codes = set(progress_data.get("completed_codes", []))
-                        call_count_offset = progress_data.get("api_call_count", 0)
-                    else:
-                        logger.warning(f"진행 상태 파일이 비어 있습니다: {progress_path}")
-                        completed_codes = set()
-                        call_count_offset = 0
-            except (json.JSONDecodeError, Exception) as e:
-                logger.error(f"진행 상태 파일 로드 실패 ({e}): {progress_path}")
-                completed_codes = set()
-                call_count_offset = 0
-        else:
-            completed_codes = set()
-            call_count_offset = 0
-
-        total_companies = len(company_list)
-        logger.info(f"🚀 전수 재수집 시작: 총 {total_companies}개 기업 (API 한도: {max_api_calls})")
-        
-        # 데이터셋 이름은 fs_type에 따라 동적으로 결정되므로 여기서 루프 안으로 이동
-        
-        for idx, comp in enumerate(company_list):
-            name = comp['name']
-            code = comp['code']
-            
-            if code in completed_codes:
-                continue
-                
-            # 현재 호출 횟수 체크 (Port에서 실시간 횟수 가져옴)
-            current_calls = self._financial_port.call_count
-            if current_calls >= max_api_calls:
-                logger.warning(f"🛑 API 호출 한도({max_api_calls})에 도달했습니다. 작업을 중단하고 상태를 저장합니다.")
-                break
-
-            # 연결(CFS)과 개별(OFS)용 전체 데이터를 누적할 빈 리스트
-            cfs_accumulated_data = []
-            ofs_accumulated_data = []
-
-            # 한 번의 호출로 연결(CFS)과 개별(OFS) 모두 수집
-            for year in range(start_year, end_year + 1):
-                if self._financial_port.call_count >= max_api_calls:
-                    break
-
-                try:
-                    time.sleep(0.05)
-                    # 통합 조회 (CFS, OFS 모두 반환)
-                    statements = self._financial_port.get_all_statements(code, year, ReportType.Q1)
-                    semi_statements = self._financial_port.get_all_statements(code, year, ReportType.SEMI_ANNUAL)
-                    q3_statements = self._financial_port.get_all_statements(code, year, ReportType.Q3)
-                    annual_statements = self._financial_port.get_all_statements(code, year, ReportType.ANNUAL)
-
-                    # 각 유형별(연결/개별)로 처리 및 누적
-                    for fs_type in [FinancialStatementType.CONSOLIDATED, FinancialStatementType.SEPARATE]:
-                        type_label = "연결" if fs_type == FinancialStatementType.CONSOLIDATED else "개별"
-                        
-                        q1 = statements.get(fs_type)
-                        semi = semi_statements.get(fs_type)
-                        q3 = q3_statements.get(fs_type)
-                        annual = annual_statements.get(fs_type)
-
-                        if not any([q1, semi, q3, annual]):
-                            continue
-
-                        metrics = self._processing_service.calculate_quarterly_performance(q1, semi, q3, annual, fs_type)
-                        
-                        company_data = []
-                        # 분기 데이터 추가
-                        for q in ["1Q", "2Q", "3Q", "4Q"]:
-                            m = metrics.metrics_by_quarter.get(q)
-                            if m and m.revenue is not None:
-                                company_data.append({
-                                    "기업명": name,
-                                    "연도": year,
-                                    "구분": "분기",
-                                    "구분_상세": type_label,
-                                    "분기": q,
-                                    "매출액": m.revenue,
-                                    "영업이익": m.operating_profit,
-                                    "당기순이익": m.net_income
-                                })
-                        
-                        # 연간 데이터 추가
-                        if metrics.annual_metrics and metrics.annual_metrics.revenue is not None:
-                            company_data.append({
-                                "기업명": name,
-                                "연도": year,
-                                "구분": "연간",
-                                "구분_상세": type_label,
-                                "분기": "연간",
-                                "매출액": metrics.annual_metrics.revenue,
-                                "영업이익": metrics.annual_metrics.operating_profit,
-                                "당기순이익": metrics.annual_metrics.net_income
-                            })
-
-                        if company_data:
-                            if fs_type == FinancialStatementType.CONSOLIDATED:
-                                cfs_accumulated_data.extend(company_data)
-                            else:
-                                ofs_accumulated_data.extend(company_data)
-                except Exception as e:
-                    logger.error(f"  - {name} {year}년 데이터 가공 실패: {e}")
-
-            # 연도 루프가 종료된 후 연결/개별 데이터 각각 저장
-            if cfs_accumulated_data:
-                df = pd.DataFrame(cfs_accumulated_data)
-                self._repository_port.save_partition("financial_data_cfs", code, df)
-            if ofs_accumulated_data:
-                df = pd.DataFrame(ofs_accumulated_data)
-                self._repository_port.save_partition("financial_data_ofs", code, df)
-
-            # API 한도 도달 시 중단 처리
-            if self._financial_port.call_count >= max_api_calls:
-                self._save_progress(progress_path, total_companies, completed_codes, idx, name)
-                break
-                
-            completed_codes.add(code)
-            if (idx + 1) % 10 == 0:
-                self._save_progress(progress_path, total_companies, completed_codes, idx, name)
-                
-            # 다음 기업 안내를 위한 로깅
-            next_comp = company_list[idx + 1] if idx + 1 < total_companies else None
-            next_info = f" (다음 예정: {next_comp['name']})" if next_comp else " (마지막 기업입니다)"
-            logger.info(f"  ✅ {name} 완료!{next_info}")
-
-            # 매 기업 완료 시마다 진행 상태 파일 업데이트
-            self._save_progress(progress_path, total_companies, completed_codes, idx, name)
-
-        final_calls = self._financial_port.call_count
-        logger.info(f"🏁 수집 세션 종료. (최종 호출 횟수: {final_calls})")
-        logger.info("데이터 재수집 및 저장이 완료되었습니다.")
-        
-        try:
-            # 거대 엑셀 생성은 메모리 효율을 위해 여기서 직접 수행하지 않고 개별 엑셀 추출을 권장합니다.
-            pass
-        except Exception as e:
-            logger.warning(f"후처리 작업 중 알림: {e}")
-            
-
-    def _save_progress(self, path: str, total: int, completed_codes: set, last_idx: int, last_name: str):
-        """진행 상태를 파일에 저장합니다."""
-        state = {
-            "total_companies": total,
-            "completed_codes": list(completed_codes),
-            "last_processed_idx": last_idx,
-            "last_processed_name": last_name,
-            "api_call_count": self._financial_port.call_count,
-            "last_updated": datetime.now().isoformat()
-        }
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(state, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"진행 상태 저장 실패: {e}")
 
     def _append_to_list(
         self, 

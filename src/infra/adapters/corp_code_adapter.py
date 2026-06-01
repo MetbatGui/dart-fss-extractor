@@ -96,7 +96,7 @@ class CorpCodeAdapter(CorpCodePort):
                             mapping[name.strip()] = code.strip()
                 if mapping:
                     return mapping
-            except Exception as e:
+            except Exception:
                 # 에러 시 원래 DART XML 파싱으로 Fallback
                 pass
 
@@ -115,17 +115,6 @@ class CorpCodeAdapter(CorpCodePort):
                 else:
                     mapping[name] = code
         return mapping
-
-    # ---------------------------------------------------------------------
-    # CorpCodePort 구현
-    # ---------------------------------------------------------------------
-    def get_all_mapping(self) -> Mapping[str, str]:
-        """전체 기업명‑코드 매핑을 반환한다."""
-        return self._load_mapping(only_listed=False)
-
-    def get_listed_companies(self) -> Mapping[str, str]:
-        """상장사(종목코드가 있는 기업)명-코드 매핑을 반환한다."""
-        return self._load_mapping(only_listed=True)
 
     def get_code(self, company_name: str) -> Optional[str]:
         """단일 기업명의 코드를 조회한다.

@@ -38,14 +38,6 @@ class SqliteRepositoryAdapter(RepositoryPort):
         if self._conn:
             self._conn.close()
 
-    def save_dataframe(self, key: str, df: pd.DataFrame) -> None:
-        """하위 호환을 위한 단일 DataFrame 저장 (임시 구현)."""
-        logger.warning("save_dataframe은 SQLite 어댑터에서 기본적으로 개별 파티션 저장을 권장합니다.")
-
-    def load_dataframe(self, key: str) -> Optional[pd.DataFrame]:
-        """하위 호환을 위한 단일 DataFrame 로드 (임시 구현)."""
-        return None
-
     def save_partition(self, dataset_name: str, partition_name: str, df: pd.DataFrame) -> None:
         """특정 기업의 실적 DataFrame 데이터를 SQLite에 적재 (INSERT OR REPLACE)."""
         if df.empty:
@@ -180,18 +172,7 @@ class SqliteRepositoryAdapter(RepositoryPort):
         if not company_codes:
             return []
 
-        # 코드 목록에 해당하는 기업 중 실적이 없는 목록 조회
         placeholders = ",".join("?" for _ in company_codes)
-        query = f"""
-        SELECT c.corp_code
-        FROM (SELECT value AS corp_code FROM json_each(?)) c
-        LEFT JOIN financials f ON c.corp_code = f.corp_code 
-            AND f.year = ? 
-            AND f.quarter = ? 
-            AND f.detail_type = ?
-        WHERE f.revenue IS NULL
-        """
-        
         # json_each 호환성 대안을 위한 간결한 SQL IN 절 사용
         query_in = f"""
         SELECT corp_code FROM companies 

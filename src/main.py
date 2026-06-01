@@ -1,5 +1,6 @@
 """메인 실행 스크립트."""
 
+import argparse
 import os
 import sys
 import logging
@@ -25,7 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-import argparse
+
 
 def main():
     # .env 파일 로드

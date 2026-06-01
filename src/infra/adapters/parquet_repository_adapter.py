@@ -16,29 +16,6 @@ class ParquetRepositoryAdapter(RepositoryPort):
         self._base_dir = Path(base_dir)
         self._base_dir.mkdir(parents=True, exist_ok=True)
 
-    def save_dataframe(self, key: str, df: pd.DataFrame) -> None:
-        """DataFrame을 Parquet로 저장."""
-        file_path = self._get_file_path(key)
-        temp_path = file_path.with_suffix(".tmp")
-        try:
-            df.to_parquet(temp_path, index=True)
-            import os
-            os.replace(temp_path, file_path)
-        except Exception as e:
-            if temp_path.exists():
-                try:
-                    temp_path.unlink()
-                except Exception:
-                    pass
-            raise e
-
-    def load_dataframe(self, key: str) -> Optional[pd.DataFrame]:
-        """Parquet 파일 로드."""
-        file_path = self._get_file_path(key)
-        if not file_path.exists():
-            return None
-        return pd.read_parquet(file_path)
-
     def save_partition(
         self, dataset_name: str, partition_name: str, df: pd.DataFrame
     ) -> None:
@@ -137,7 +114,3 @@ class ParquetRepositoryAdapter(RepositoryPort):
             return pd.read_parquet(file_path)
         except Exception:
             return pd.DataFrame()
-
-    def _get_file_path(self, key: str) -> Path:
-        """키에 해당하는 파일 경로 반환."""
-        return self._base_dir / f"{key}.parquet"

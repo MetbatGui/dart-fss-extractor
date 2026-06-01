@@ -4,14 +4,14 @@ import logging
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import date, datetime
 
-logger = logging.getLogger(__name__)
-
 from core.domain.models.financial_statement import (
     FinancialStatement,
     AccountItem,
     ReportType,
     FinancialStatementType
 )
+
+logger = logging.getLogger(__name__)
 
 
 class DartResponseParser:
