@@ -167,3 +167,36 @@ def test_quarterly_metrics_annual_sum():
     assert annual_sum.operating_profit == Amount(1000)
     assert annual_sum.net_income == Amount(800)
 
+
+def test_financial_statement_scale_normalization_edge_cases():
+    """모든 값이 0원이거나 빈 계정과목을 갖는 보고서 유입 시 예외(math domain error) 없이 스킵되는지 검증."""
+    # 1. 0원 스케일 보고서 모사 ( abs(int(amount)) 가 0보다 큰 수치만 scales 리스트에 들어가며, 이 조건 하에 scales 리스트가 빈 상태가 됨 )
+    stmt_zero = FinancialStatement(
+        corp_code="00123456",
+        corp_name="0원기업",
+        bsns_year=2026,
+        reprt_type=ReportType.Q1,
+        fs_type=FinancialStatementType.CONSOLIDATED,
+        accounts=[
+            AccountItem("매출액", "0"),
+            AccountItem("영업이익", "0"),
+        ]
+    )
+    
+    # 2. 계정과목이 완전히 빈 보고서 모사 ( scales 리스트가 완전히 비게 됨 )
+    stmt_empty = FinancialStatement(
+        corp_code="00123456",
+        corp_name="빈기업",
+        bsns_year=2026,
+        reprt_type=ReportType.SEMI_ANNUAL,
+        fs_type=FinancialStatementType.CONSOLIDATED,
+        accounts=[]
+    )
+    
+    # 정규화 연산 시 math.log10(0) ValueError 오류 없이 안전하게 조기 스킵 가드가 작동하는지 확인
+    # (에러가 발생하지 않고 조용히 탈출해야 정상)
+    try:
+        FinancialStatement.normalize_scales([stmt_zero, stmt_empty])
+    except Exception as e:
+        pytest.fail(f"Zero or Empty statements normalization triggered an error: {e}")
+

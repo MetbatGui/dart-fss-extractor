@@ -86,3 +86,21 @@ def test_amount_casting():
         int(none_amount)
     with pytest.raises(ValueError):
         float(none_amount)
+
+
+def test_amount_math_operations_edge_cases():
+    """Amount 객체의 나눗셈 0 오류(Zero Division) 및 예외 인자 처리 방어력 검증."""
+    a = Amount(1000)
+    
+    # 1. 0으로 나누기 연산 방어 (None 반환 검증)
+    assert (a / 0) == Amount(None)
+    assert (a / Amount(0)) == Amount(None)
+    
+    # 2. 부적합한 인자와의 연산 방어 (None 반환 검증)
+    assert (a * "invalid_text") == Amount(None)
+    assert (a / "invalid_text") == Amount(None)
+    
+    # 3. 비정상 문자열 파싱 방어 (None 반환 검증)
+    assert Amount("1.2.3.4").is_none is True
+    assert Amount("--500").is_none is True
+    assert Amount("abc").is_none is True
