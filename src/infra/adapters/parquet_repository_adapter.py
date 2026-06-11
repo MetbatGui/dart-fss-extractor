@@ -48,26 +48,24 @@ class ParquetRepositoryAdapter(RepositoryPort):
         if not dataset_dir.exists():
             return pd.DataFrame()
 
-        # 1. 기본 방식 시도 (엔진이 지원하는 경우 디렉토리 전체 읽기)
-        try:
-            return pd.read_parquet(dataset_dir)
-        except Exception:
-            # 2. 실패 시 개별 파일을 하나씩 읽어서 병합 (더 안전한 방식)
-            all_files = list(dataset_dir.glob("*.parquet"))
-            if not all_files:
-                return pd.DataFrame()
+        all_files = list(dataset_dir.glob("*.parquet"))
+        if not all_files:
+            return pd.DataFrame()
 
-            dfs = []
-            for f in all_files:
-                try:
-                    dfs.append(pd.read_parquet(f))
-                except Exception:
-                    continue
+        dfs = []
+        for f in all_files:
+            try:
+                df = pd.read_parquet(f)
+                if not df.empty:
+                    df["종목코드"] = f.stem
+                    dfs.append(df)
+            except Exception:
+                continue
 
-            if not dfs:
-                return pd.DataFrame()
+        if not dfs:
+            return pd.DataFrame()
 
-            return pd.concat(dfs, ignore_index=True)
+        return pd.concat(dfs, ignore_index=True)
 
     def save_company_metadata(self, company: Company) -> None:
         """기업 메타데이터(상태) 저장."""

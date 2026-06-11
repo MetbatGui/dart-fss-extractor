@@ -112,7 +112,7 @@ class SqliteRepositoryAdapter(RepositoryPort):
             detail_type = "개별"
 
         query = """
-        SELECT corp_name AS 기업명, year AS 연도, division AS 구분, 
+        SELECT corp_code AS 종목코드, corp_name AS 기업명, year AS 연도, division AS 구분, 
                quarter AS 분기, detail_type AS 구분_상세, 
                revenue AS 매출액, operating_profit AS 영업이익, net_income AS 당기순이익
         FROM financials

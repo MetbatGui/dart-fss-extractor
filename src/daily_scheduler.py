@@ -120,40 +120,18 @@ def main():
     # (안정성을 위해 매일 갱신된 최신 DB 스냅샷을 엑셀로 원자적으로 덮어쓰기)
     try:
         logger.info("💾 SQLite 최신 영속성 스냅샷 기반으로 최종 엑셀을 단방향 갱신(Export)합니다.")
-        all_df = repository_adapter.load_all("financial_data_cfs")
+        from core.services.financial_data_export_service import FinancialDataExportService
         
-        if not all_df.empty:
-            final_dfs = {}
-            DIVISOR = 1_000_000 # 백만원 단위 조정
-            
-            # 1Q~4Q 분기별 피벗
-            df_quarter = all_df[all_df["구분"] == "분기"].copy()
-            if not df_quarter.empty:
-                df_quarter["기간"] = df_quarter["연도"].astype(int).astype(str) + "." + df_quarter["분기"].astype(str)
-                df_quarter = df_quarter.drop_duplicates(subset=["기업명", "기간"])
-                
-                final_dfs["매출액_분기별"] = df_quarter.pivot(index="기업명", columns="기간", values="매출액")
-                final_dfs["영업이익_분기별"] = df_quarter.pivot(index="기업명", columns="기간", values="영업이익")
-                final_dfs["당기순이익_분기별"] = df_quarter.pivot(index="기업명", columns="기간", values="당기순이익")
-            
-            # 연간 피벗
-            df_annual = all_df[all_df["구분"] == "연간"].copy()
-            if not df_annual.empty:
-                df_annual = df_annual.drop_duplicates(subset=["기업명", "연도"])
-                
-                final_dfs["매출액_연간"] = df_annual.pivot(index="기업명", columns="연도", values="매출액")
-                final_dfs["영업이익_연간"] = df_annual.pivot(index="기업명", columns="연도", values="영업이익")
-                final_dfs["당기순이익_연간"] = df_annual.pivot(index="기업명", columns="연도", values="당기순이익")
-
-            # 금액 단위 조정 (백만원)
-            for sheet_name, sheet_df in final_dfs.items():
-                final_dfs[sheet_name] = (sheet_df.apply(pd.to_numeric, errors='coerce') / DIVISOR).round(0)
-
-            # 최종 엑셀 쓰기
-            output_file = Path(args.output)
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-            export_adapter.export_excel(final_dfs, str(output_file))
-            logger.info(f"✨ 통합 결과 엑셀이 안전하게 동기화되었습니다: {args.output}")
+        export_service = FinancialDataExportService(
+            repository_port=repository_adapter,
+            export_port=export_adapter,
+            processing_service=processing_service
+        )
+        
+        output_file = Path(args.output)
+        success_export = export_service.export_integrated_financial_data(str(output_file))
+        
+        if success_export:
 
             # 구글 드라이브 자동 업로드 기믹
             drive_folder_id = os.getenv("GOOGLE_DRIVE_FINANCIAL_STATEMENTS_ID")
@@ -186,7 +164,7 @@ def main():
                 except Exception as drive_err:
                     logger.error(f"구글 드라이브 업로드 연동 중 오류 발생: {drive_err}", exc_info=True)
         else:
-            logger.warning("SQLite DB에 실적 데이터가 전혀 존재하지 않아 엑셀 동기화를 보류합니다.")
+            logger.warning("통합 엑셀 생성에 실패하여 구글 드라이브 업로드 및 동기화를 보류합니다.")
             
     except Exception as e:
         logger.error(f"최종 엑셀 동기화 내보내기 실패: {e}")
