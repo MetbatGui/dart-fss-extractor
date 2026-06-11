@@ -154,6 +154,37 @@ def main():
             output_file.parent.mkdir(parents=True, exist_ok=True)
             export_adapter.export_excel(final_dfs, str(output_file))
             logger.info(f"✨ 통합 결과 엑셀이 안전하게 동기화되었습니다: {args.output}")
+
+            # 구글 드라이브 자동 업로드 기믹
+            drive_folder_id = os.getenv("GOOGLE_DRIVE_FINANCIAL_STATEMENTS_ID")
+            if drive_folder_id:
+                try:
+                    logger.info("☁️ 구글 드라이브 업로드를 시작합니다...")
+                    from infra.adapters.storage.google_drive_adapter import GoogleDriveAdapter
+                    
+                    token_path = "secrets/token.json"
+                    client_secret_path = "secrets/client_secret.json"
+                    
+                    if not os.path.exists(token_path):
+                        logger.warning(f"구글 드라이브 토큰 파일이 존재하지 않아 업로드를 생략합니다: {token_path}")
+                    else:
+                        drive_adapter = GoogleDriveAdapter(
+                            token_file=token_path,
+                            root_folder_id=drive_folder_id,
+                            client_secret_file=client_secret_path if os.path.exists(client_secret_path) else None
+                        )
+                        
+                        if output_file.exists():
+                            file_data = output_file.read_bytes()
+                            success = drive_adapter.put_file("재무제표.xlsx", file_data)
+                            if success:
+                                logger.info("✨ 구글 드라이브 업로드 완료 (재무제표.xlsx)")
+                            else:
+                                logger.error("❌ 구글 드라이브 업로드 실패")
+                        else:
+                            logger.warning(f"업로드할 로컬 엑셀 파일이 존재하지 않습니다: {output_file}")
+                except Exception as drive_err:
+                    logger.error(f"구글 드라이브 업로드 연동 중 오류 발생: {drive_err}", exc_info=True)
         else:
             logger.warning("SQLite DB에 실적 데이터가 전혀 존재하지 않아 엑셀 동기화를 보류합니다.")
             
