@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 
 from infra.adapters.excel_export_adapter import ExcelExportAdapter
-from infra.adapters.parquet_repository_adapter import ParquetRepositoryAdapter
+from infra.adapters.sqlite.sqlite_repository_adapter import SqliteRepositoryAdapter
 from core.services.data_processing_service import DataProcessingService
 from core.services.financial_data_export_service import FinancialDataExportService
 
@@ -39,10 +39,10 @@ def export_v2_integrated():
     # 1. output 폴더 청소
     clear_output_directory(output_dir)
     
-    output_path = output_dir / "financial_data_integrated.xlsx"
+    output_path = output_dir / "재무제표.xlsx"
     
     # 2. 어댑터 및 서비스 초기화 (이식된 서비스 호출)
-    repository_adapter = ParquetRepositoryAdapter()
+    repository_adapter = SqliteRepositoryAdapter()
     export_adapter = ExcelExportAdapter()
     processing_service = DataProcessingService()
     
