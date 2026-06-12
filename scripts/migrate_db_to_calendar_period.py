@@ -72,7 +72,7 @@ def get_correct_calendar_period(fiscal_year: int, fiscal_quarter: str, settlemen
     if calendar_month == 0:
         calendar_month = 12
 
-    calendar_quarter = f"{calendar_month // 3}Q"
+    calendar_quarter = f"{(calendar_month - 1) // 3 + 1}Q"
     
     if calendar_month > settlement_month:
         calendar_year = fiscal_year - 1

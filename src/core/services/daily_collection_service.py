@@ -252,7 +252,7 @@ class DailyCollectionService:
                                 calendar_month = (company.settlement_month + quarter_num * 3) % 12
                                 if calendar_month == 0:
                                     calendar_month = 12
-                                c_quarter = f"{calendar_month // 3}Q"
+                                c_quarter = f"{(calendar_month - 1) // 3 + 1}Q"
                                 
                                 if calendar_month > company.settlement_month:
                                     c_year = year - 1

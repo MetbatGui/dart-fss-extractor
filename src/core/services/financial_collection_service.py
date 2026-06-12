@@ -266,7 +266,7 @@ class FinancialCollectionService:
                         calendar_month = (settlement_month + quarter_num * 3) % 12
                         if calendar_month == 0:
                             calendar_month = 12
-                        calendar_quarter = f"{calendar_month // 3}Q"
+                        calendar_quarter = f"{(calendar_month - 1) // 3 + 1}Q"
                         
                         if calendar_month > settlement_month:
                             calendar_year = year - 1
