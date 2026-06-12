@@ -82,7 +82,14 @@ class FinancialCollectionService:
             # Company 객체 로드 또는 생성
             company = self._repository_port.load_company_metadata(code)
             if not company:
-                company = Company(code=code, name=name)
+                try:
+                    settlement_month = self._financial_port.get_settlement_month(code)
+                except Exception as e:
+                    logger.error(f"신규 기업 {name} ({code}) 결산월 조회 실패: {e}")
+                    settlement_month = 12
+                company = Company(code=code, name=name, settlement_month=settlement_month)
+                self._repository_port.save_company_metadata(company)
+
 
             # 2-1. 저장소 데이터와 메타데이터 동기화 (Sync)
             # 메타데이터에는 없지만 실제 파티션 파일에는 데이터가 있을 수 있음
@@ -145,7 +152,7 @@ class FinancialCollectionService:
                     metrics = self._processing_service.calculate_quarterly_performance(q1, semi, q3, annual)
                     
                     # 데이터 리스트에 추가
-                    self._append_to_list(company_data, name, year, metrics)
+                    self._append_to_list(company_data, name, year, metrics, company.settlement_month)
                     
                     # 성공 기록
                     company.mark_success(year)
@@ -240,19 +247,37 @@ class FinancialCollectionService:
         data_list: List[Dict], 
         name: str, 
         year: int, 
-        metrics: QuarterlyMetrics
+        metrics: QuarterlyMetrics,
+        settlement_month: int = 12
     ) -> None:
-        """계산된 지표를 리스트에 추가 (Long Format)."""
+        """계산된 지표를 리스트에 추가 (Long Format)하며 결산월 기준 캘린더 분기로 보정합니다."""
         
         # 1. 분기 데이터 추가
         for q in ["1Q", "2Q", "3Q", "4Q"]:
             m = metrics.metrics_by_quarter.get(q)
             if m:
+                # 캘린더 분기 보정
+                calendar_year = year
+                calendar_quarter = q
+                
+                if settlement_month != 12:
+                    try:
+                        quarter_num = int(q[0])  # "1Q" -> 1
+                        calendar_month = (settlement_month + quarter_num * 3) % 12
+                        if calendar_month == 0:
+                            calendar_month = 12
+                        calendar_quarter = f"{calendar_month // 3}Q"
+                        
+                        if calendar_month > settlement_month:
+                            calendar_year = year - 1
+                    except Exception as e:
+                        logger.error(f"[{name}] 캘린더 분기 보정 계산 중 오류: {e}")
+
                 data_list.append({
                     "기업명": name,
-                    "연도": year,
+                    "연도": calendar_year,
                     "구분": "분기",
-                    "분기": q,
+                    "분기": calendar_quarter,
                     "매출액": m.revenue,
                     "영업이익": m.operating_profit,
                     "당기순이익": m.net_income
@@ -285,3 +310,4 @@ class FinancialCollectionService:
                     "영업이익": annual.operating_profit,
                     "당기순이익": annual.net_income
                 })
+

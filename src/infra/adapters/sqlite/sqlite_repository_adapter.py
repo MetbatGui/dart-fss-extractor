@@ -32,6 +32,22 @@ class SqliteRepositoryAdapter(RepositoryPort):
         
         # 테이블 및 인덱스 초기화
         initialize_db(self._conn)
+        self._migrate_schema_if_needed()
+
+    def _migrate_schema_if_needed(self) -> None:
+        """기존 DB에 settlement_month 컬럼이 없을 경우 자동으로 추가해주는 마이그레이션 방어 로직입니다."""
+        cursor = self._conn.cursor()
+        try:
+            # PRAGMA table_info를 사용하여 컬럼 존재 여부 체크
+            cursor.execute("PRAGMA table_info(companies)")
+            columns = [row["name"] for row in cursor.fetchall()]
+            if "settlement_month" not in columns:
+                logger.info("companies 테이블에 settlement_month 컬럼이 존재하지 않아 추가 마이그레이션을 시작합니다.")
+                with self._conn:
+                    self._conn.execute("ALTER TABLE companies ADD COLUMN settlement_month INTEGER DEFAULT 12")
+                logger.info("companies 테이블에 settlement_month 컬럼을 성공적으로 추가했습니다.")
+        except Exception as e:
+            logger.error(f"스키마 마이그레이션 검사 중 실패: {e}")
 
     def close(self) -> None:
         """커넥션을 안전하게 닫습니다."""
@@ -128,8 +144,8 @@ class SqliteRepositoryAdapter(RepositoryPort):
         failed_str = ",".join(map(str, company.failed_years))
 
         query = """
-        INSERT OR REPLACE INTO companies (corp_code, corp_name, success_years, failed_years, last_updated)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO companies (corp_code, corp_name, success_years, failed_years, last_updated, settlement_month)
+        VALUES (?, ?, ?, ?, ?, ?)
         """
         with self._conn:
             self._conn.execute(query, (
@@ -137,7 +153,8 @@ class SqliteRepositoryAdapter(RepositoryPort):
                 company.name,
                 success_str if success_str else None,
                 failed_str if failed_str else None,
-                company.last_updated
+                company.last_updated,
+                company.settlement_month
             ))
 
     def load_company_metadata(self, code: str) -> Optional[Company]:
@@ -158,13 +175,23 @@ class SqliteRepositoryAdapter(RepositoryPort):
         if row["failed_years"]:
             failed_years = [int(y) for y in row["failed_years"].split(",") if y.strip()]
 
+        # 기존 DB 호환성 보장: settlement_month가 없을 경우 기본값 12
+        settlement_month = 12
+        try:
+            if "settlement_month" in row.keys() and row["settlement_month"] is not None:
+                settlement_month = int(row["settlement_month"])
+        except Exception:
+            pass
+
         return Company(
             code=row["corp_code"],
             name=row["corp_name"],
             success_years=success_years,
             failed_years=failed_years,
-            last_updated=row["last_updated"]
+            last_updated=row["last_updated"],
+            settlement_month=settlement_month
         )
+
 
     # --- SQLite 고속 확장 기능 ---
     def find_missing_companies(self, company_codes: List[str], year: int, quarter: str, detail_type: str = "연결") -> List[str]:

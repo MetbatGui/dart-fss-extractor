@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS companies (
     corp_name TEXT UNIQUE NOT NULL,
     success_years TEXT,   -- 콤마 분리된 연도 리스트 (예: "2024,2025")
     failed_years TEXT,    -- 콤마 분리된 연도 리스트 (예: "2023")
-    last_updated TEXT
+    last_updated TEXT,
+    settlement_month INTEGER DEFAULT 12
 );
 """
 

@@ -325,12 +325,27 @@ class DartFinancialAdapter(FinancialStatementPort):
                 disclosures = data.get("list", [])
                 all_disclosures.extend(disclosures)
                 
-                total_page = int(data.get("total_page", 1))
-                if page_no >= total_page:
-                    break
-                page_no += 1
-            except Exception as e:
-                logger.error(f"DART 공시목록 API 호출 실패: {e}")
-                break
-
         return all_disclosures
+
+    def get_settlement_month(self, corp_code: str) -> int:
+        """DART 기업개황 API를 통해 결산월을 조회합니다.
+        
+        조회된 결과는 정수로 반환하며, 실패 시 기본값 12를 반환합니다.
+        """
+        url = "https://opendart.fss.or.kr/api/company.json"
+        params = {"crtfc_key": self._api_key, "corp_code": corp_code}
+        try:
+            self._call_count += 1
+            resp = requests.get(url, params=params, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("status") == "000":
+                acc_mt = data.get("acc_mt", "12")
+                logger.info(f"DART에서 기업({corp_code})의 결산월 조회 성공: {acc_mt}월")
+                return int(acc_mt)
+            else:
+                logger.warning(f"DART 기업개황 API 응답 이상 ({data.get('status')}): {data.get('message')}")
+        except Exception as e:
+            logger.error(f"DART 기업개황 API 호출 중 오류 발생: {e}")
+        return 12
+

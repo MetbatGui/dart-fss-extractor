@@ -13,6 +13,7 @@ class Company:
     failed_years: List[int] = field(default_factory=list)
     success_years: List[int] = field(default_factory=list)
     last_updated: Optional[str] = None
+    settlement_month: int = 12
     
     def mark_success(self, year: int) -> None:
         """연도별 수집 성공 표시."""
@@ -46,3 +47,4 @@ class Company:
     def from_dict(cls, data: Dict) -> 'Company':
         """딕셔너리에서 객체 생성."""
         return cls(**data)
+

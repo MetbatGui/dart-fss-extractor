@@ -87,8 +87,21 @@ class DailyCollectionService:
 
             logger.info(f"🎯 대상 기업 공시 포착: [{corp_name}] {report_nm} (접수번호: {rcept_no})")
 
+            # 기업 정보 조회해서 결산월 얻어오기
+            company = self._repository_port.load_company_metadata(corp_code)
+            if not company:
+                try:
+                    settlement_month = self._financial_port.get_settlement_month(corp_code)
+                except Exception as e:
+                    logger.error(f"신규 기업 {corp_name} 결산월 조회 실패: {e}")
+                    settlement_month = 12
+                company = Company(code=corp_code, name=corp_name, settlement_month=settlement_month)
+                self._repository_port.save_company_metadata(company)
+            
+            settlement_month = company.settlement_month
+
             # 4. 공시 시기(연도, 분기) 및 정정 여부 동적 분석
-            period_info = self.parse_report_period(report_nm, rm)
+            period_info = self.parse_report_period(report_nm, settlement_month, rm)
             if not period_info:
                 logger.warning(f"  ❌ 공시 제목에서 결산 연월을 추출하지 못했습니다: {report_nm}")
                 continue
@@ -116,31 +129,51 @@ class DailyCollectionService:
         logger.info(f"🏁 데일리 공시 수집 종료. 성공: {len(success_codes)}건, 실패: {len(failed_codes)}건")
         return {"success": success_codes, "failed": failed_codes}
 
-    def parse_report_period(self, report_nm: str, rm: str = "") -> Optional[Dict]:
-        """보고서 제목 및 비고 필드에서 실제 대상 연도, 분기, 정정 여부를 판별합니다."""
+    def parse_report_period(self, report_nm: str, settlement_month: int = 12, rm: str = "") -> Optional[Dict]:
+        """보고서 제목 및 비고 필드에서 실제 DART 기준 대상 연도, 분기, 정정 여부를 판별합니다."""
         # 괄호 안의 YYYY.MM 패턴 검색
         match = re.search(r"\((\d{4})\.(\d{2})\)", report_nm)
         if not match:
             return None
 
-        year = int(match.group(1))
-        month = match.group(2)
+        year_in_title = int(match.group(1))
+        month_in_title = int(match.group(2))
 
-        period = self.MONTH_TO_PERIOD.get(month)
+        # 결산월과 공시월의 차이를 기반으로 DART 분기 판별 (일반 공식)
+        diff = (month_in_title - settlement_month) % 12
+        if diff == 0:
+            diff = 12
+
+        # 3, 6, 9, 12개월 차이에 따라 분기 매핑
+        quarter_mapping = {
+            3: (ReportType.Q1, "1Q"),
+            6: (ReportType.SEMI_ANNUAL, "2Q"),
+            9: (ReportType.Q3, "3Q"),
+            12: (ReportType.ANNUAL, "4Q")
+        }
+
+        period = quarter_mapping.get(diff)
         if not period:
             return None
 
         report_type, quarter_str = period
         
+        # 공시 제목의 기준월이 결산월보다 크다면 다음 연도 마감 사업연도에 해당
+        if month_in_title > settlement_month:
+            fiscal_year = year_in_title + 1
+        else:
+            fiscal_year = year_in_title
+        
         # 정정 여부 판별 (제목 내 기재정정/정정 텍스트 혹은 비고 필드 '정' 마크)
         is_amendment = "[기재정정]" in report_nm or "정정" in report_nm or "정" in rm.strip()
 
         return {
-            "year": year,
+            "year": fiscal_year,
             "quarter": quarter_str,
             "report_type": report_type,
             "is_amendment": is_amendment
         }
+
 
     def _process_single_disclosure(
         self,
@@ -155,7 +188,14 @@ class DailyCollectionService:
             # 1. 기업 메타데이터 로드 또는 생성
             company = self._repository_port.load_company_metadata(corp_code)
             if not company:
-                company = Company(code=corp_code, name=corp_name)
+                try:
+                    settlement_month = self._financial_port.get_settlement_month(corp_code)
+                except Exception as e:
+                    logger.error(f"신규 기업 {corp_name} 결산월 조회 실패: {e}")
+                    settlement_month = 12
+                company = Company(code=corp_code, name=corp_name, settlement_month=settlement_month)
+                self._repository_port.save_company_metadata(company)
+
 
             # 정정공시가 아니고 이미 해당 연도가 성공한 경우 API 호출 방지를 위해 패스 가드
             if not is_amendment and year in company.success_years:
@@ -202,11 +242,28 @@ class DailyCollectionService:
                 for q_str in ["1Q", "2Q", "3Q", "4Q"]:
                     m = metrics.metrics_by_quarter.get(q_str)
                     if m and m.is_valid:
+                        # 캘린더 분기 보정
+                        c_year = year
+                        c_quarter = q_str
+                        
+                        if company.settlement_month != 12:
+                            try:
+                                quarter_num = int(q_str[0])  # "1Q" -> 1
+                                calendar_month = (company.settlement_month + quarter_num * 3) % 12
+                                if calendar_month == 0:
+                                    calendar_month = 12
+                                c_quarter = f"{calendar_month // 3}Q"
+                                
+                                if calendar_month > company.settlement_month:
+                                    c_year = year - 1
+                            except Exception as e:
+                                logger.error(f"[{corp_name}] 데일리 캘린더 분기 보정 중 오류: {e}")
+
                         quarter_rows.append({
                             "기업명": corp_name,
-                            "연도": year,
+                            "연도": c_year,
                             "구분": "분기",
-                            "분기": q_str,
+                            "분기": c_quarter,
                             "구분_상세": "연결" if fs_type == FinancialStatementType.CONSOLIDATED else "개별",
                             "매출액": m.revenue,
                             "영업이익": m.operating_profit,

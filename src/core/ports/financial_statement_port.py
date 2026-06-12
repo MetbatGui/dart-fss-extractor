@@ -57,3 +57,16 @@ class FinancialStatementPort(ABC):
             공시 목록 list of dict
         """
         raise NotImplementedError
+
+    @abstractmethod
+    def get_settlement_month(self, corp_code: str) -> int:
+        """기업의 결산월을 조회합니다.
+        
+        Args:
+            corp_code: DART 기업 코드
+            
+        Returns:
+            결산월 (1~12, 기본값 12)
+        """
+        raise NotImplementedError
+
