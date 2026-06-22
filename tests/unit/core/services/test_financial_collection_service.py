@@ -66,6 +66,9 @@ def test_collect_and_save_success(
     
     # Company 메타데이터 로드 (없음)
     mock_repository_port.load_company_metadata.return_value = None
+    
+    # 결산월 모킹 추가
+    mock_financial_port.get_settlement_month.return_value = 12
 
     # load_all Mock (저장된 데이터 시뮬레이션)
     saved_df = pd.DataFrame([{
@@ -97,8 +100,8 @@ def test_collect_and_save_success(
     # 메타데이터 로드 확인
     mock_repository_port.load_company_metadata.assert_called_once_with("12345678")
     
-    # 메타데이터 저장 확인
-    mock_repository_port.save_company_metadata.assert_called_once()
+    # 메타데이터 저장 확인 (생성 시 1번 + 완료 시 1번 = 총 2번)
+    assert mock_repository_port.save_company_metadata.call_count == 2
     saved_company = mock_repository_port.save_company_metadata.call_args[0][0]
     assert isinstance(saved_company, Company)
     assert 2023 in saved_company.success_years
@@ -120,6 +123,7 @@ def test_collect_failure_tracking(
     mock_corp_code_port.get_codes.return_value = ["999999"]
     mock_repository_port.exists.return_value = False
     mock_repository_port.load_company_metadata.return_value = None
+    mock_financial_port.get_settlement_month.return_value = 12
     mock_repository_port.load_all.return_value = pd.DataFrame()
 
     # API 에러 발생
@@ -127,8 +131,8 @@ def test_collect_failure_tracking(
 
     service.collect_and_save(company_names, 2023, 2023, "test.xlsx")
 
-    # 메타데이터 저장 확인
-    mock_repository_port.save_company_metadata.assert_called_once()
+    # 메타데이터 저장 확인 (생성 시 1번 + 실패 시 1번 = 총 2번)
+    assert mock_repository_port.save_company_metadata.call_count == 2
     saved_company = mock_repository_port.save_company_metadata.call_args[0][0]
     
     # 2023년이 실패 목록에 있어야 함
@@ -154,6 +158,9 @@ def test_retry_on_failure_history(
     existing_company = Company(code="888888", name="RetryCorp")
     existing_company.failed_years = [2023]
     mock_repository_port.load_company_metadata.return_value = existing_company
+    
+    # 결산월 모킹 추가
+    mock_financial_port.get_settlement_month.return_value = 12
     
     mock_repository_port.load_all.return_value = pd.DataFrame() # 마지막 병합용
 

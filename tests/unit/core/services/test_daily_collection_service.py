@@ -96,8 +96,8 @@ def test_collect_daily_disclosures_filtering_and_routing(service, mock_ports):
     fin_port.get_disclosures.return_value = disclosures
 
     # 2. DART 상세 재무제표 반환 모사 (1Q ~ 4Q)
-    def mock_get_statement(code, year, rep_type):
-        return FinancialStatement(
+    def mock_get_all_statements(code, year, rep_type):
+        stmt = FinancialStatement(
             corp_code=code,
             corp_name="A사",
             bsns_year=year,
@@ -109,7 +109,9 @@ def test_collect_daily_disclosures_filtering_and_routing(service, mock_ports):
                 AccountItem("당기순이익", "80")
             ]
         )
-    fin_port.get_financial_statement.side_effect = mock_get_statement
+        return {FinancialStatementType.CONSOLIDATED: stmt}
+    fin_port.get_all_statements.side_effect = mock_get_all_statements
+    fin_port.get_settlement_month.return_value = 12
 
     # 수집 수행
     result = service.collect_daily_disclosures(
@@ -124,7 +126,7 @@ def test_collect_daily_disclosures_filtering_and_routing(service, mock_ports):
     assert result["failed"] == []
     
     # 4개 분기 보고서 조회가 정확히 호출되었는지 확인
-    assert fin_port.get_financial_statement.call_count == 4
+    assert fin_port.get_all_statements.call_count == 4
     
     # SQLite 저장소 적재(save_partition)가 정상 트리거되었는지 확인
     repo_port.save_partition.assert_called()

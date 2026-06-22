@@ -158,11 +158,18 @@ class DailyCollectionService:
 
         report_type, quarter_str = period
         
-        # 공시 제목의 기준월이 결산월보다 크다면 다음 연도 마감 사업연도에 해당
-        if month_in_title > settlement_month:
-            fiscal_year = year_in_title + 1
-        else:
+        # 결산월이 12월이면 연도 변환 불필요
+        if settlement_month == 12:
             fiscal_year = year_in_title
+        else:
+            # 회기 시작월 계산 (예: 3월 결산 -> 4월 시작)
+            start_month = (settlement_month % 12) + 1
+            # 공시 기준월이 회기 시작월보다 크거나 같으면, 회기가 시작한 해와 공시 연도가 같음
+            if month_in_title >= start_month:
+                fiscal_year = year_in_title
+            else:
+                # 공시 기준월이 결산월 이하인 경우(해를 넘겨 공시된 경우), 회기가 시작한 해는 공시 연도 - 1
+                fiscal_year = year_in_title - 1
         
         # 정정 여부 판별 (제목 내 기재정정/정정 텍스트 혹은 비고 필드 '정' 마크)
         is_amendment = "[기재정정]" in report_nm or "정정" in report_nm or "정" in rm.strip()
@@ -204,16 +211,28 @@ class DailyCollectionService:
 
             # 2. 실적 역산을 위해 해당 연도의 1Q~4Q 보고서 전체를 수집 (안정성 보장)
             # (향후 부분 수집 고도화 가능하나, 분기 역산 정밀 복원을 위해 연간 패키지 수집 규칙 유지)
-            statements = []
+            # 연결(CFS)과 개별(OFS) 각각의 보고서 리스트를 독립적으로 구축
+            statements_by_type = {
+                FinancialStatementType.CONSOLIDATED: [],
+                FinancialStatementType.SEPARATE: []
+            }
+            
+            import time
             for q_num in [1, 2, 3, 4]:
                 rep_type = {1: ReportType.Q1, 2: ReportType.SEMI_ANNUAL, 3: ReportType.Q3, 4: ReportType.ANNUAL}[q_num]
                 
-                # 연결 재무제표 우선 조회
-                stmt = self._financial_port.get_financial_statement(corp_code, year, rep_type)
-                statements.append(stmt)
+                # DART API 호출 간 Rate Limit 방어 스로틀링
+                time.sleep(0.1)
+                
+                # 연결과 개별 재무제표를 각각 DART API로 조회
+                results = self._financial_port.get_all_statements(corp_code, year, rep_type)
+                
+                statements_by_type[FinancialStatementType.CONSOLIDATED].append(results.get(FinancialStatementType.CONSOLIDATED))
+                statements_by_type[FinancialStatementType.SEPARATE].append(results.get(FinancialStatementType.SEPARATE))
 
             # 계산에 유효한 데이터가 아예 없는 경우 에러 처리
-            if not any(statements):
+            has_any_data = any(statements_by_type[FinancialStatementType.CONSOLIDATED]) or any(statements_by_type[FinancialStatementType.SEPARATE])
+            if not has_any_data:
                 logger.warning(f"  ❌ [{corp_name}] {year}년의 재무보고서 데이터가 존재하지 않습니다.")
                 company.mark_failure(year)
                 self._repository_port.save_company_metadata(company)
@@ -224,12 +243,16 @@ class DailyCollectionService:
             for fs_type in [FinancialStatementType.CONSOLIDATED, FinancialStatementType.SEPARATE]:
                 type_label = "CFS" if fs_type == FinancialStatementType.CONSOLIDATED else "OFS"
                 
+                type_statements = statements_by_type[fs_type]
+                if not any(type_statements):
+                    continue # 해당 유형의 데이터가 없으면 적재 스킵
+                
                 metrics = QuarterlyMetrics.calculate_from_statements(
                     corp_name=corp_name,
-                    q1_stmt=statements[0],
-                    semi_stmt=statements[1],
-                    q3_stmt=statements[2],
-                    annual_stmt=statements[3],
+                    q1_stmt=type_statements[0],
+                    semi_stmt=type_statements[1],
+                    q3_stmt=type_statements[2],
+                    annual_stmt=type_statements[3],
                     revenue_kws=self._processing_service.REVENUE_KEYWORDS,
                     op_profit_kws=self._processing_service.OP_PROFIT_KEYWORDS,
                     net_income_kws=self._processing_service.NET_INCOME_KEYWORDS,
