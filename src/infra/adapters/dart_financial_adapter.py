@@ -324,6 +324,10 @@ class DartFinancialAdapter(FinancialStatementPort):
                 
                 disclosures = data.get("list", [])
                 all_disclosures.extend(disclosures)
+                page_no += 1
+            except Exception as e:
+                logger.error(f"DART 공시목록 조회 중 예외 발생: {e}")
+                break
                 
         return all_disclosures
 
