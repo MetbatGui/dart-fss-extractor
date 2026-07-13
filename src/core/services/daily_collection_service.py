@@ -2,12 +2,14 @@
 
 import re
 import logging
+from datetime import datetime, timedelta
 from typing import List, Dict, Set, Optional
 import pandas as pd
 
 from core.ports.corp_code_port import CorpCodePort
 from core.ports.financial_statement_port import FinancialStatementPort
 from core.ports.repository_port import RepositoryPort
+from core.ports.cache_port import CachePort
 from core.domain.models.financial_statement import ReportType, FinancialStatementType
 from core.domain.models.performance_metrics import QuarterlyMetrics
 from core.domain.models.company import Company
@@ -32,11 +34,13 @@ class DailyCollectionService:
         corp_code_port: CorpCodePort,
         financial_port: FinancialStatementPort,
         repository_port: RepositoryPort,
+        cache_port: CachePort,
         processing_service: DataProcessingService
     ):
         self._corp_code_port = corp_code_port
         self._financial_port = financial_port
         self._repository_port = repository_port
+        self._cache_port = cache_port
         self._processing_service = processing_service
 
     def collect_daily_disclosures(
@@ -54,7 +58,6 @@ class DailyCollectionService:
             
         Returns:
             수집 결과 요약 (성공한 기업 코드 목록, 실패한 기업 코드 목록)
-        ```
         """
         logger.info(f"📅 데일리 공시 스캔 시작: {start_date} ~ {end_date} (대상 기업 수: {len(target_company_names)})")
         
@@ -74,6 +77,22 @@ class DailyCollectionService:
         success_codes = []
         failed_codes = []
 
+        current_time = datetime.now().isoformat()
+
+        # 2-1. 캐시 사전 일괄 로드 및 만료 제거
+        try:
+            cache_dict = self._cache_port.load_all()
+            cache_dict = {
+                rcp_no: val for rcp_no, val in cache_dict.items()
+                if val.get("expired_at", "") > current_time
+            }
+            logger.info(f"💾 로드된 유효 공시 캐시 개수: {len(cache_dict)}개")
+        except Exception as e:
+            logger.error(f"  ❌ 캐시 로드 중 예외 발생 (비어있는 캐시로 진행): {e}")
+            cache_dict = {}
+
+        cache_updated = False
+
         # 3. 감지된 공시 스캔 및 필터링
         for disc in disclosures:
             corp_code = disc.get("corp_code")
@@ -84,6 +103,13 @@ class DailyCollectionService:
             rcept_no = disc.get("rcept_no", "")
             rm = disc.get("rm", "")
             corp_name = corp_code_to_name[corp_code]
+
+            # 3-1. 일괄 로드된 캐시 필터링 검사 (메모리 O(1) 매칭)
+            if rcept_no in cache_dict:
+                valid_cache = cache_dict[rcept_no]
+                logger.info(f"  💡 [캐시 히트] [{corp_name}] {report_nm} ({rcept_no}) - 이미 최근 3일 이내에 수집된 기록이 존재하여 스킵합니다. (만료일시: {valid_cache.get('expired_at')})")
+                success_codes.append(corp_code)
+                continue
 
             logger.info(f"🎯 대상 기업 공시 포착: [{corp_name}] {report_nm} (접수번호: {rcept_no})")
 
@@ -123,8 +149,28 @@ class DailyCollectionService:
 
             if success:
                 success_codes.append(corp_code)
+                # 수집 성공 시 메모리 캐시 딕셔너리에 추가
+                collected_time = datetime.now()
+                expired_time = collected_time + timedelta(days=3)
+                cache_dict[rcept_no] = {
+                    "corp_code": corp_code,
+                    "corp_name": corp_name,
+                    "report_nm": report_nm,
+                    "collected_at": collected_time.isoformat(),
+                    "expired_at": expired_time.isoformat()
+                }
+                cache_updated = True
+                logger.info(f"  [메모리 캐시 갱신] {corp_name} / {rcept_no} (만료예정: {expired_time.isoformat()})")
             else:
                 failed_codes.append(corp_code)
+
+        # 6. 캐시 갱신 건이 존재하면 최종 디스크에 단 1회 일괄 기록
+        if cache_updated:
+            try:
+                self._cache_port.save_all(cache_dict)
+                logger.info("💾 갱신된 수집 캐시 딕셔너리를 디스크(JSON 파일)에 일괄 영속화 완료했습니다.")
+            except Exception as e:
+                logger.error(f"  ❌ 수집 캐시 파일 일괄 영속화 실패: {e}")
 
         logger.info(f"🏁 데일리 공시 수집 종료. 성공: {len(success_codes)}건, 실패: {len(failed_codes)}건")
         return {"success": success_codes, "failed": failed_codes}
