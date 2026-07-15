@@ -123,3 +123,61 @@ def test_force_download() -> None:
 
     # Cleanup
     shutil.rmtree(temp_root)
+
+
+def test_smart_cache_invalidation() -> None:
+    """타겟 컴퍼니 파일의 수정 시각이 캐시보다 최신일 때 강제 다운로드가 유발되는지 확인."""
+    import shutil
+    import tempfile
+    import zipfile
+    import io
+    import time
+    from unittest.mock import patch, MagicMock
+
+    temp_root = Path(tempfile.mkdtemp())
+    
+    # 1. 파일 경로 준비
+    target_csv = temp_root / "target_companies.csv"
+    
+    # 타겟 컴퍼니 임시 파일 작성
+    with open(target_csv, "w", encoding="utf-8") as f:
+        f.write("기업명\nTest Corp\n")
+        
+    with patch.dict(os.environ, {"OUTPUT_DIRECTORY": str(temp_root), "DART_API_KEY": "dummy_key"}), \
+         patch("requests.get") as mock_get:
+        
+        # 2. 첫 다운로드를 위한 더미 ZIP 세팅
+        dummy_xml = (
+            b"<result><list><corp_code>12345678</corp_code><corp_name>Test Corp</corp_name>"
+            b"<stock_code>123456</stock_code><modify_date>20230101</modify_date></list>"
+            + b"<!-- " + b"x" * 2000 + b" --></result>"
+        )
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("CORPCODE.xml", dummy_xml)
+        
+        mock_response = MagicMock()
+        mock_response.content = zip_buffer.getvalue()
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        # 3. 최초 어댑터 초기화 (최초 다운로드 수행됨)
+        adapter = CorpCodeAdapter(force_download=False, target_companies_path=str(target_csv))
+        assert mock_get.call_count == 1
+        
+        # 4. 다운로드 횟수 초기화 및 캐시 파일이 더 최신인 상태 테스트
+        mock_get.reset_mock()
+        # 캐시의 수정 시각을 더 뒤로 조정
+        os.utime(adapter._XML_PATH, (time.time() + 10, time.time() + 10))
+        # 다시 어댑터 생성 (mtime이 캐시가 더 최신이므로 다운로드 미호출해야 함)
+        _ = CorpCodeAdapter(force_download=False, target_companies_path=str(target_csv))
+        assert mock_get.call_count == 0
+
+        # 5. 타겟 컴퍼니 파일의 수정 시각을 캐시보다 더 미래(최신)로 조정
+        os.utime(target_csv, (time.time() + 20, time.time() + 20))
+        # 다시 어댑터 생성 (target_mtime > cache_mtime이므로 자동 강제 다운로드 유발)
+        _ = CorpCodeAdapter(force_download=False, target_companies_path=str(target_csv))
+        assert mock_get.call_count == 1
+
+    # Cleanup
+    shutil.rmtree(temp_root)

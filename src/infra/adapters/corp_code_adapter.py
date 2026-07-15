@@ -23,13 +23,15 @@ class CorpCodeAdapter(CorpCodePort):
     _ZIP_PATH = _CACHE_DIR / "corpCode.zip"
     _XML_PATH = _CACHE_DIR / "CORPCODE.xml"
 
-    def __init__(self, force_download: bool = False) -> None:
+    def __init__(self, force_download: bool = False, target_companies_path: str = "data/target_companies.csv") -> None:
         """생성자.
 
         Args:
             force_download: ``True``이면 매 호출 시 최신 XML을 다운로드한다.
+            target_companies_path: 타겟 기업 목록 파일 경로 (캐시 비교용)
         """
         self._force_download = force_download
+        self._target_companies_path = target_companies_path
         self._ensure_data()
 
     # ---------------------------------------------------------------------
@@ -40,6 +42,7 @@ class CorpCodeAdapter(CorpCodePort):
 
         다운로드는 환경 변수 ``DART_API_KEY`` 가 필요하다.
         파일이 존재하더라도 크기가 너무 작으면(1KB 미만) 손상된 것으로 간주하고 재다운로드한다.
+        타겟 컴퍼니 파일의 수정 시각이 캐시보다 더 최신이면 강제로 재다운로드한다.
         """
         self._CACHE_DIR.mkdir(parents=True, exist_ok=True)
         
@@ -49,6 +52,21 @@ class CorpCodeAdapter(CorpCodePort):
             should_download = True
         elif self._XML_PATH.stat().st_size < 1024:  # 1KB 미만이면 손상 의심
             should_download = True
+            
+        # 타겟 컴퍼니 파일의 수정 시각이 캐시보다 더 최신이면 재다운로드 트리거
+        if not should_download and self._XML_PATH.is_file():
+            target_path = Path(self._target_companies_path)
+            if target_path.is_file():
+                target_mtime = target_path.stat().st_mtime
+                cache_mtime = self._XML_PATH.stat().st_mtime
+                if target_mtime > cache_mtime:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.info(
+                        f"[캐시 무효화] 타겟 파일({target_path.name})의 변경 시각이 "
+                        f"캐시({self._XML_PATH.name})보다 최신입니다. 고유번호를 재다운로드합니다."
+                    )
+                    should_download = True
             
         if should_download:
             self._download_and_extract()
