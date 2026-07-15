@@ -183,3 +183,8 @@ settings.json
 /scripts
 
 /secrets
+
+# User temporary files
+todo.xtx
+report.md
+PIPELINE_MEMORY.md

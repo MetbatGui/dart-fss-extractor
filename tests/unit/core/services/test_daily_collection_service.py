@@ -20,24 +20,27 @@ def mock_ports():
     corp_code_port = MagicMock()
     financial_port = MagicMock()
     repository_port = MagicMock()
+    cache_port = MagicMock()
     
     # 기본 모킹 세팅 (A사 매칭용)
     corp_code_port.get_codes.return_value = ["001"]
     repository_port.load_company_metadata.return_value = None
+    cache_port.load_all.return_value = {}
     
-    return corp_code_port, financial_port, repository_port
+    return corp_code_port, financial_port, repository_port, cache_port
 
 
 @pytest.fixture
 def service(mock_ports):
     """DailyCollectionService 테스트 인스턴스."""
-    cc_port, fin_port, repo_port = mock_ports
+    cc_port, fin_port, repo_port, cache_port = mock_ports
     proc_service = DataProcessingService()
     
     return DailyCollectionService(
         corp_code_port=cc_port,
         financial_port=fin_port,
         repository_port=repo_port,
+        cache_port=cache_port,
         processing_service=proc_service
     )
 
@@ -74,7 +77,7 @@ def test_parse_report_period(service):
 
 def test_collect_daily_disclosures_filtering_and_routing(service, mock_ports):
     """당일 공시 목록 중 대상 기업만 정상 필터링하여 실적을 수집하는 시나리오 검증."""
-    cc_port, fin_port, repo_port = mock_ports
+    cc_port, fin_port, repo_port, cache_port = mock_ports
 
     # 1. 오늘 들어온 공시 목록 모사 (대상 A사와 비대상 B사 섞임)
     disclosures = [
