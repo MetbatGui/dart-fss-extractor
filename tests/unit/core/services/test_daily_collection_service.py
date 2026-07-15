@@ -21,19 +21,21 @@ def mock_ports():
     financial_port = MagicMock()
     repository_port = MagicMock()
     cache_port = MagicMock()
+    download_port = MagicMock()
+    xbrl_parser_port = MagicMock()
     
     # 기본 모킹 세팅 (A사 매칭용)
     corp_code_port.get_codes.return_value = ["001"]
     repository_port.load_company_metadata.return_value = None
     cache_port.load_all.return_value = {}
     
-    return corp_code_port, financial_port, repository_port, cache_port
+    return corp_code_port, financial_port, repository_port, cache_port, download_port, xbrl_parser_port
 
 
 @pytest.fixture
 def service(mock_ports):
     """DailyCollectionService 테스트 인스턴스."""
-    cc_port, fin_port, repo_port, cache_port = mock_ports
+    cc_port, fin_port, repo_port, cache_port, down_port, parser_port = mock_ports
     proc_service = DataProcessingService()
     
     return DailyCollectionService(
@@ -41,6 +43,8 @@ def service(mock_ports):
         financial_port=fin_port,
         repository_port=repo_port,
         cache_port=cache_port,
+        download_port=down_port,
+        xbrl_parser_port=parser_port,
         processing_service=proc_service
     )
 
@@ -77,7 +81,7 @@ def test_parse_report_period(service):
 
 def test_collect_daily_disclosures_filtering_and_routing(service, mock_ports):
     """당일 공시 목록 중 대상 기업만 정상 필터링하여 실적을 수집하는 시나리오 검증."""
-    cc_port, fin_port, repo_port, cache_port = mock_ports
+    cc_port, fin_port, repo_port, cache_port, down_port, parser_port = mock_ports
 
     # 1. 오늘 들어온 공시 목록 모사 (대상 A사와 비대상 B사 섞임)
     disclosures = [
@@ -133,3 +137,60 @@ def test_collect_daily_disclosures_filtering_and_routing(service, mock_ports):
     
     # SQLite 저장소 적재(save_partition)가 정상 트리거되었는지 확인
     repo_port.save_partition.assert_called()
+
+
+def test_collect_daily_disclosures_with_local_xbrl_path(service, mock_ports):
+    """로컬에 XBRL ZIP 캐시가 있거나 다운로드된 경우, API 대신 로컬 파서를 이용해 파싱 및 적재하는 시나리오 검증."""
+    cc_port, fin_port, repo_port, cache_port, down_port, parser_port = mock_ports
+
+    # 1. 공시 목록 세팅 (A사)
+    disclosures = [{
+        "corp_code": "001",
+        "corp_name": "A사",
+        "report_nm": "분기보고서 (2026.03)",
+        "rcept_no": "202605290001",
+        "rm": ""
+    }]
+    fin_port.get_disclosures.return_value = disclosures
+    fin_port.get_settlement_month.return_value = 12
+
+    # 2. 로컬 ZIP에서 파싱된 가상의 FinancialStatement 결과 모사
+    # 연결재무제표만 반환
+    stmt = FinancialStatement(
+        corp_code="001",
+        corp_name="A사",
+        bsns_year=2026,
+        reprt_type=ReportType.Q1,
+        fs_type=FinancialStatementType.CONSOLIDATED,
+        accounts=[
+            AccountItem("매출액", "5000"),
+            AccountItem("영업이익", "500"),
+            AccountItem("당기순이익", "400")
+        ]
+    )
+    parser_port.parse_xbrl_zip.return_value = {FinancialStatementType.CONSOLIDATED: stmt}
+    down_port.download_xbrl_zip.return_value = b"mock_zip_bytes"
+
+    # 3. 로컬 파일 시스템 모킹하여 캐시가 없는 상태 모사
+    with patch("pathlib.Path.exists") as mock_exists, \
+         patch("pathlib.Path.read_bytes") as mock_read, \
+         patch("pathlib.Path.write_bytes") as mock_write, \
+         patch("pathlib.Path.mkdir") as mock_mkdir:
+         
+        mock_exists.return_value = False  # 로컬 ZIP 파일 및 JSON 캐시 모두 미존재
+        
+        # 수집 실행
+        result = service.collect_daily_disclosures(
+            target_company_names=["A사"],
+            start_date="20260529",
+            end_date="20260529"
+        )
+        
+        # 4. 검증
+        assert result["success"] == ["001"]
+        # download_port가 실제로 호출되어 ZIP 파일을 받아왔는지 검증
+        down_port.download_xbrl_zip.assert_called_with("202605290001")
+        # 받아온 ZIP 바이트로 로컬 파서가 호출되었는지 검증
+        parser_port.parse_xbrl_zip.assert_called()
+        # 데이터베이스 적재 검증
+        repo_port.save_partition.assert_called()
