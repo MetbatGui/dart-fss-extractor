@@ -15,13 +15,14 @@ from core.domain.models.financial_statement import (
     ReportType,
 )
 from core.ports.financial_statement_port import FinancialStatementPort
+from core.ports.api_financial_collector_port import ApiFinancialCollectorPort
 from infra.adapters.dart_response_parser import DartResponseParser
 
 logger = logging.getLogger(__name__)
 
 
-class DartFinancialAdapter(FinancialStatementPort):
-    """DART API를 통한 재무제표 조회 어댑터.
+class DartFinancialAdapter(FinancialStatementPort, ApiFinancialCollectorPort):
+    """DART API REST (JSON) 기반 재무제표 수집 어댑터.
     
     - 연결재무제표 우선 조회, 실패 시 개별재무제표로 fallback
     - 로컬 캐싱 지원 (데이터 없음 상태 포함)

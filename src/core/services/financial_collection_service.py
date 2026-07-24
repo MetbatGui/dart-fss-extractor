@@ -7,12 +7,14 @@ import pandas as pd
 
 from core.ports.corp_code_port import CorpCodePort
 from core.ports.financial_statement_port import FinancialStatementPort
+from core.ports.api_financial_collector_port import ApiFinancialCollectorPort
 from core.ports.repository_port import RepositoryPort
 from core.ports.export_port import ExportPort
 from core.domain.models.financial_statement import ReportType
 from core.services.data_processing_service import DataProcessingService
 from core.domain.models.performance_metrics import QuarterlyMetrics
 from core.domain.models.company import Company
+from typing import Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +31,7 @@ class FinancialCollectionService:
     def __init__(
         self,
         corp_code_port: CorpCodePort,
-        financial_port: FinancialStatementPort,
+        financial_port: Union[FinancialStatementPort, ApiFinancialCollectorPort],
         repository_port: RepositoryPort,
         export_port: ExportPort,
         processing_service: DataProcessingService

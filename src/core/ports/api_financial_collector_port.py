@@ -1,0 +1,41 @@
+"""OpenDART API REST 호출 기반 수집 포트 인터페이스."""
+
+from abc import ABC, abstractmethod
+from typing import Optional, Dict
+
+from core.domain.models.financial_statement import (
+    FinancialStatement,
+    FinancialStatementType,
+    ReportType,
+)
+
+
+class ApiFinancialCollectorPort(ABC):
+    """OpenDART REST API (JSON) 기반 재무제표 수집 포트."""
+
+    @property
+    @abstractmethod
+    def call_count(self) -> int:
+        """API 호출 횟수를 반환합니다."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_financial_statement(
+        self,
+        corp_code: str,
+        year: int,
+        report_type: ReportType,
+        prefer_consolidated: bool = True
+    ) -> Optional[FinancialStatement]:
+        """단일 재무제표 API 조회."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_all_statements(
+        self,
+        corp_code: str,
+        year: int,
+        report_type: ReportType
+    ) -> Dict[FinancialStatementType, FinancialStatement]:
+        """연결 및 개별 재무제표를 각각 API로 조회."""
+        raise NotImplementedError

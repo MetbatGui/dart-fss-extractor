@@ -14,6 +14,7 @@ from core.services.daily_collection_service import DailyCollectionService
 from core.services.data_processing_service import DataProcessingService
 from infra.adapters.corp_code_adapter import CorpCodeAdapter
 from infra.adapters.dart_financial_adapter import DartFinancialAdapter
+from infra.adapters.dart_xbrl_financial_adapter import DartXbrlFinancialAdapter
 from infra.adapters.sqlite.sqlite_repository_adapter import SqliteRepositoryAdapter
 from infra.adapters.excel_export_adapter import ExcelExportAdapter
 
@@ -97,16 +98,19 @@ def main():
 
     # 어댑터 및 서비스 초기화
     corp_code_adapter = CorpCodeAdapter()
-    financial_adapter = DartFinancialAdapter(api_key=api_key, use_cache=True)
+    api_financial_adapter = DartFinancialAdapter(api_key=api_key, use_cache=True)
+    xbrl_financial_adapter = DartXbrlFinancialAdapter(api_key=api_key)
     repository_adapter = SqliteRepositoryAdapter()
     export_adapter = ExcelExportAdapter()
     processing_service = DataProcessingService()
 
     daily_service = DailyCollectionService(
         corp_code_port=corp_code_adapter,
-        financial_port=financial_adapter,
+        financial_port=api_financial_adapter,
         repository_port=repository_adapter,
-        processing_service=processing_service
+        processing_service=processing_service,
+        xbrl_collector_port=xbrl_financial_adapter,
+        api_collector_port=api_financial_adapter
     )
 
     # 1. 당일 공시 스캔 및 증분 적재 수행 (SQLite 트랜잭션 수호)

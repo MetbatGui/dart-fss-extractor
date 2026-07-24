@@ -9,6 +9,8 @@ import pandas as pd
 from pathlib import Path
 from core.ports.corp_code_port import CorpCodePort
 from core.ports.financial_statement_port import FinancialStatementPort
+from core.ports.api_financial_collector_port import ApiFinancialCollectorPort
+from core.ports.xbrl_financial_collector_port import XbrlFinancialCollectorPort
 from core.ports.repository_port import RepositoryPort
 from core.ports.cache_port import CachePort
 from core.ports.download_port import DownloadPort
@@ -37,10 +39,12 @@ class DailyCollectionService:
         corp_code_port: CorpCodePort,
         financial_port: FinancialStatementPort,
         repository_port: RepositoryPort,
-        cache_port: CachePort,
-        download_port: DownloadPort,
-        xbrl_parser_port: XbrlParserPort,
-        processing_service: DataProcessingService
+        cache_port: Optional[CachePort] = None,
+        download_port: Optional[DownloadPort] = None,
+        xbrl_parser_port: Optional[XbrlParserPort] = None,
+        processing_service: Optional[DataProcessingService] = None,
+        xbrl_collector_port: Optional[XbrlFinancialCollectorPort] = None,
+        api_collector_port: Optional[ApiFinancialCollectorPort] = None
     ):
         self._corp_code_port = corp_code_port
         self._financial_port = financial_port
@@ -48,7 +52,9 @@ class DailyCollectionService:
         self._cache_port = cache_port
         self._download_port = download_port
         self._xbrl_parser_port = xbrl_parser_port
-        self._processing_service = processing_service
+        self._processing_service = processing_service or DataProcessingService()
+        self._xbrl_collector_port = xbrl_collector_port
+        self._api_collector_port = api_collector_port
 
     def collect_daily_disclosures(
         self,
@@ -262,27 +268,7 @@ class DailyCollectionService:
                 logger.info(f"  💡 [{corp_name}] {year}년 데이터가 이미 성공적으로 저장되어 있어 스킵합니다.")
                 return True
 
-            # 2. 로컬 XBRL ZIP 파일 캐시 검사 및 다운로드 처리
-            cache_dir = Path("data/xbrl_zip")
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            zip_file_path = cache_dir / f"{rcept_no}.zip"
-
-            zip_data = None
-            if zip_file_path.is_file():
-                logger.info(f"  💾 [로컬 캐시 히트] 원본 XBRL ZIP 파일 발견: {zip_file_path.name}")
-                zip_data = zip_file_path.read_bytes()
-            else:
-                logger.info(f"  📡 [다운로드 시도] XBRL ZIP 다운로드 시작 (접수번호: {rcept_no})")
-                try:
-                    fetched_data = self._download_port.download_xbrl_zip(rcept_no)
-                    if fetched_data and isinstance(fetched_data, (bytes, bytearray)):
-                        zip_data = fetched_data
-                        zip_file_path.write_bytes(zip_data)
-                        logger.info(f"  💾 [다운로드 성공] 원본 ZIP 파일 캐시 저장 완료: {zip_file_path.name}")
-                except Exception as down_err:
-                    logger.warning(f"  ⚠️ 원본 ZIP 다운로드 또는 로컬 쓰기 중 경고: {down_err}")
-
-            # 3. 로컬 XBRL 파싱 실행
+            # 2. XBRL 파싱 수집 실행 (XbrlCollectorPort 또는 로컬 파서 포트 사용)
             statements = {}
             report_type_mapping = {
                 "1Q": ReportType.Q1,
@@ -292,18 +278,48 @@ class DailyCollectionService:
             }
             rep_type = report_type_mapping.get(quarter, ReportType.Q1)
 
-            if zip_data:
-                try:
-                    statements = self._xbrl_parser_port.parse_xbrl_zip(
-                        zip_data=zip_data,
-                        corp_code=corp_code,
-                        corp_name=corp_name,
-                        year=year,
-                        report_type=rep_type,
-                        acc_month=company.settlement_month
-                    )
-                except Exception as parse_err:
-                    logger.error(f"  ❌ [{corp_name}] 로컬 XBRL ZIP 파싱 실패: {parse_err}")
+            if self._xbrl_collector_port:
+                statements = self._xbrl_collector_port.collect_from_disclosure(
+                    rcept_no=rcept_no,
+                    corp_code=corp_code,
+                    corp_name=corp_name,
+                    year=year,
+                    report_type=rep_type,
+                    acc_month=company.settlement_month
+                )
+            else:
+                # 레거시 직접 파싱 방식 보장
+                cache_dir = Path("data/xbrl_zip")
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                zip_file_path = cache_dir / f"{rcept_no}.zip"
+
+                zip_data = None
+                if zip_file_path.is_file():
+                    logger.info(f"  💾 [로컬 캐시 히트] 원본 XBRL ZIP 파일 발견: {zip_file_path.name}")
+                    zip_data = zip_file_path.read_bytes()
+                elif self._download_port:
+                    logger.info(f"  📡 [다운로드 시도] XBRL ZIP 다운로드 시작 (접수번호: {rcept_no})")
+                    try:
+                        fetched_data = self._download_port.download_xbrl_zip(rcept_no)
+                        if fetched_data and isinstance(fetched_data, (bytes, bytearray)):
+                            zip_data = fetched_data
+                            zip_file_path.write_bytes(zip_data)
+                            logger.info(f"  💾 [다운로드 성공] 원본 ZIP 파일 캐시 저장 완료: {zip_file_path.name}")
+                    except Exception as down_err:
+                        logger.warning(f"  ⚠️ 원본 ZIP 다운로드 또는 로컬 쓰기 중 경고: {down_err}")
+
+                if zip_data and self._xbrl_parser_port:
+                    try:
+                        statements = self._xbrl_parser_port.parse_xbrl_zip(
+                            zip_data=zip_data,
+                            corp_code=corp_code,
+                            corp_name=corp_name,
+                            year=year,
+                            report_type=rep_type,
+                            acc_month=company.settlement_month
+                        )
+                    except Exception as parse_err:
+                        logger.error(f"  ❌ [{corp_name}] 로컬 XBRL ZIP 파싱 실패: {parse_err}")
 
             # 4. 파싱 성공 시 DB 적재
             if statements:
@@ -378,12 +394,19 @@ class DailyCollectionService:
                 FinancialStatementType.SEPARATE: []
             }
             
+            collector = self._api_collector_port or self._financial_port
+            if not collector:
+                logger.warning(f"  ⚠️ [{corp_name}] 로컬 파싱 불가 및 API 수집 어댑터 미설정으로 수집 실패.")
+                company.mark_failure(year)
+                self._repository_port.save_company_metadata(company)
+                return False
+
             import time
             for q_num in [1, 2, 3, 4]:
                 q_rep_type = {1: ReportType.Q1, 2: ReportType.SEMI_ANNUAL, 3: ReportType.Q3, 4: ReportType.ANNUAL}[q_num]
                 time.sleep(0.1)
                 
-                results = self._financial_port.get_all_statements(corp_code, year, q_rep_type)
+                results = collector.get_all_statements(corp_code, year, q_rep_type)
                 statements_by_type[FinancialStatementType.CONSOLIDATED].append(results.get(FinancialStatementType.CONSOLIDATED))
                 statements_by_type[FinancialStatementType.SEPARATE].append(results.get(FinancialStatementType.SEPARATE))
 
