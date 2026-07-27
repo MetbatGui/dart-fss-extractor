@@ -1,6 +1,5 @@
 """당일 공시 기반 데일리 배치 증분 수집 서비스."""
 
-import re
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Set, Optional
@@ -16,6 +15,7 @@ from core.ports.download_port import DownloadPort
 from core.ports.xbrl_parser_port import XbrlParserPort
 from core.domain.models.financial_statement import ReportType, FinancialStatementType
 from core.domain.models.company import Company
+from core.domain.models.disclosure_period import DisclosurePeriod
 from core.services.data_processing_service import DataProcessingService
 
 logger = logging.getLogger(__name__)
@@ -123,16 +123,7 @@ class DailyCollectionService:
             logger.info(f"🎯 대상 기업 공시 포착: [{corp_name}] {report_nm} (접수번호: {rcept_no})")
 
             # 기업 정보 조회해서 결산월 얻어오기
-            company = self._repository_port.load_company_metadata(corp_code)
-            if not company:
-                try:
-                    settlement_month = self._financial_port.get_settlement_month(corp_code)
-                except Exception as e:
-                    logger.error(f"신규 기업 {corp_name} 결산월 조회 실패: {e}")
-                    settlement_month = 12
-                company = Company(code=corp_code, name=corp_name, settlement_month=settlement_month)
-                self._repository_port.save_company_metadata(company)
-
+            company = self._get_or_create_company(corp_code, corp_name)
             settlement_month = company.settlement_month
 
             # 4. 공시 시기(연도, 분기) 및 정정 여부 동적 분석
@@ -186,55 +177,20 @@ class DailyCollectionService:
         return {"success": success_codes, "failed": failed_codes}
 
     def parse_report_period(self, report_nm: str, settlement_month: int = 12, rm: str = "") -> Optional[Dict]:
-        """보고서 제목 및 비고 필드에서 실제 DART 기준 대상 연도, 분기, 정정 여부를 판별합니다."""
-        # 괄호 안의 YYYY.MM 패턴 검색
-        match = re.search(r"\((\d{4})\.(\d{2})\)", report_nm)
-        if not match:
-            return None
+        """보고서 제목 및 비고 필드에서 실제 DART 기준 대상 연도, 분기, 정정 여부를 판별합니다.
 
-        year_in_title = int(match.group(1))
-        month_in_title = int(match.group(2))
-
-        # 결산월과 공시월의 차이를 기반으로 DART 분기 판별 (일반 공식)
-        diff = (month_in_title - settlement_month) % 12
-        if diff == 0:
-            diff = 12
-
-        # 3, 6, 9, 12개월 차이에 따라 분기 매핑
-        quarter_mapping = {
-            3: (ReportType.Q1, "1Q"),
-            6: (ReportType.SEMI_ANNUAL, "2Q"),
-            9: (ReportType.Q3, "3Q"),
-            12: (ReportType.ANNUAL, "4Q")
-        }
-
-        period = quarter_mapping.get(diff)
+        판별 규칙 자체는 도메인 모델(DisclosurePeriod)에 위임하고, 기존 호출부와의
+        호환성을 위해 Dict 형태로 변환하여 반환합니다.
+        """
+        period = DisclosurePeriod.from_report_title(report_nm, settlement_month, rm)
         if not period:
             return None
 
-        report_type, quarter_str = period
-
-        # 결산월이 12월이면 연도 변환 불필요
-        if settlement_month == 12:
-            fiscal_year = year_in_title
-        else:
-            # 회기 시작월 계산 (예: 3월 결산 -> 4월 시작)
-            start_month = (settlement_month % 12) + 1
-            # 공시 기준월이 회기 시작월보다 크거나 같으면, 회기가 시작한 해와 공시 연도가 같음
-            if month_in_title >= start_month:
-                fiscal_year = year_in_title
-            else:
-                # 공시 기준월이 결산월 이하인 경우(해를 넘겨 공시된 경우), 회기가 시작한 해는 공시 연도 - 1
-                fiscal_year = year_in_title - 1
-
-        # 정정 여부 판별 (제목 내 기재정정/정정 텍스트 혹은 비고 필드 '정' 마크)
-        is_amendment = "[기재정정]" in report_nm or "정정" in report_nm or "정" in rm.strip()
-
         return {
-            "year": fiscal_year,
-            "quarter": quarter_str,
-            "report_type": report_type,
-            "is_amendment": is_amendment
+            "year": period.year,
+            "quarter": period.quarter,
+            "report_type": period.report_type,
+            "is_amendment": period.is_amendment
         }
 
     def _process_single_disclosure(
@@ -253,15 +209,7 @@ class DailyCollectionService:
         """
         try:
             # 1. 기업 메타데이터 로드 또는 생성
-            company = self._repository_port.load_company_metadata(corp_code)
-            if not company:
-                try:
-                    settlement_month = self._financial_port.get_settlement_month(corp_code)
-                except Exception as e:
-                    logger.error(f"신규 기업 {corp_name} 결산월 조회 실패: {e}")
-                    settlement_month = 12
-                company = Company(code=corp_code, name=corp_name, settlement_month=settlement_month)
-                self._repository_port.save_company_metadata(company)
+            company = self._get_or_create_company(corp_code, corp_name)
 
             # 정정공시가 아니고 이미 해당 연도가 성공한 경우 API 호출 방지를 위해 패스 가드
             if not is_amendment and year in company.success_years:
@@ -336,21 +284,11 @@ class DailyCollectionService:
                     ni_amount = stmt.find_account_amount(list(self._processing_service.NET_INCOME_KEYWORDS))
 
                     # 캘린더 분기 보정
-                    c_year = year
-                    c_quarter = quarter
-
-                    if company.settlement_month != 12:
-                        try:
-                            quarter_num = int(quarter[0])  # "1Q" -> 1
-                            calendar_month = (company.settlement_month + quarter_num * 3) % 12
-                            if calendar_month == 0:
-                                calendar_month = 12
-                            c_quarter = f"{(calendar_month - 1) // 3 + 1}Q"
-
-                            if calendar_month > company.settlement_month:
-                                c_year = year - 1
-                        except Exception as e:
-                            logger.error(f"[{corp_name}] 캘린더 분기 보정 중 오류: {e}")
+                    c_year, c_quarter = year, quarter
+                    try:
+                        c_year, c_quarter = company.to_calendar_period(year, quarter)
+                    except Exception as e:
+                        logger.error(f"[{corp_name}] 캘린더 분기 보정 중 오류: {e}")
 
                     quarter_rows.append({
                         "기업명": corp_name,
@@ -397,3 +335,16 @@ class DailyCollectionService:
                 company.mark_failure(year)
                 self._repository_port.save_company_metadata(company)
             return False
+
+    def _get_or_create_company(self, corp_code: str, corp_name: str) -> Company:
+        """기업 메타데이터를 조회하고, 없으면 결산월을 조회해 신규 생성 후 저장합니다."""
+        company = self._repository_port.load_company_metadata(corp_code)
+        if not company:
+            try:
+                settlement_month = self._financial_port.get_settlement_month(corp_code)
+            except Exception as e:
+                logger.error(f"신규 기업 {corp_name} 결산월 조회 실패: {e}")
+                settlement_month = 12
+            company = Company(code=corp_code, name=corp_name, settlement_month=settlement_month)
+            self._repository_port.save_company_metadata(company)
+        return company
