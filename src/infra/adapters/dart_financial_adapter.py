@@ -29,21 +29,25 @@ class DartFinancialAdapter(FinancialStatementPort, ApiFinancialCollectorPort):
     """
 
     _API_URL = "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json"
-    _CACHE_DIR = Path(os.getenv("OUTPUT_DIRECTORY", "./data")).resolve() / "financial_statements"
     _NO_DATA_MARKER = "NO_DATA"
 
-    def __init__(self, api_key: Optional[str] = None, use_cache: bool = True):
+    def __init__(self, api_key: Optional[str] = None, use_cache: bool = True, cache_dir: Optional[str] = None):
         """초기화.
-        
+
         Args:
             api_key: DART API 키 (None이면 환경변수에서 읽음)
             use_cache: 캐시 사용 여부
+            cache_dir: 캐시 저장 경로 (None이면 OUTPUT_DIRECTORY 환경변수 기반 기본 경로 사용)
         """
         self._api_key = api_key or os.getenv("DART_API_KEY")
         if not self._api_key:
             raise EnvironmentError("DART_API_KEY가 설정되지 않았습니다.")
         self._use_cache = use_cache
-        self._CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        if cache_dir:
+            self._cache_dir = Path(cache_dir).resolve()
+        else:
+            self._cache_dir = Path(os.getenv("OUTPUT_DIRECTORY", "./data")).resolve() / "financial_statements"
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._call_count = 0
 
     @property
@@ -187,7 +191,7 @@ class DartFinancialAdapter(FinancialStatementPort, ApiFinancialCollectorPort):
         fs_type: FinancialStatementType
     ) -> Path:
         """캐시 파일 경로 생성."""
-        corp_dir = self._CACHE_DIR / corp_code
+        corp_dir = self._cache_dir / corp_code
         corp_dir.mkdir(parents=True, exist_ok=True)
         
         report_name = {

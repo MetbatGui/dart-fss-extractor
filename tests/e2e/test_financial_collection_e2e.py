@@ -35,13 +35,20 @@ def setup_logging():
     root_logger.addHandler(handler)
 
 
+_E2E_CACHE_DIR = Path(__file__).parent / ".cache"
+
+
 @pytest.fixture
 def setup_services():
     # 실제 어댑터 사용
     # API 키는 환경 변수 DART_API_KEY에서 자동으로 로드됨
-    financial_adapter = DartFinancialAdapter(use_cache=True)
-    corp_code_adapter = CorpCodeAdapter()
-    
+    # 캐시를 tests/e2e/.cache 에 고정해 재실행 시 재다운로드/재호출을 방지한다.
+    financial_adapter = DartFinancialAdapter(
+        use_cache=True,
+        cache_dir=str(_E2E_CACHE_DIR / "financial_statements")
+    )
+    corp_code_adapter = CorpCodeAdapter(cache_dir=str(_E2E_CACHE_DIR / "corp_code"))
+
     # E2E 테스트용 저장소 설정 (테스트 후 정리 필요하지만, pytest tmp_path 등 활용 권장)
     # 여기서는 그냥 기본 경로 사용
     repository_adapter = ParquetRepositoryAdapter(base_dir="test_data/repo_e2e")

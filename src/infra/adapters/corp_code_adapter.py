@@ -19,17 +19,26 @@ class CorpCodeAdapter(CorpCodePort):
       구체적인 구현 세부사항을 알 필요가 없다.
     """
 
-    _CACHE_DIR = Path(os.getenv("OUTPUT_DIRECTORY", "./data")).resolve() / "corp_code"
-    _ZIP_PATH = _CACHE_DIR / "corpCode.zip"
-    _XML_PATH = _CACHE_DIR / "CORPCODE.xml"
-
-    def __init__(self, force_download: bool = False, target_companies_path: str = "data/target_companies.csv") -> None:
+    def __init__(
+        self,
+        force_download: bool = False,
+        target_companies_path: str = "data/target_companies.csv",
+        cache_dir: Optional[str] = None
+    ) -> None:
         """생성자.
 
         Args:
             force_download: ``True``이면 매 호출 시 최신 XML을 다운로드한다.
             target_companies_path: 타겟 기업 목록 파일 경로 (캐시 비교용)
+            cache_dir: 캐시 저장 경로 (None이면 OUTPUT_DIRECTORY 환경변수 기반 기본 경로 사용)
         """
+        if cache_dir:
+            self._CACHE_DIR = Path(cache_dir).resolve()
+        else:
+            self._CACHE_DIR = Path(os.getenv("OUTPUT_DIRECTORY", "./data")).resolve() / "corp_code"
+        self._ZIP_PATH = self._CACHE_DIR / "corpCode.zip"
+        self._XML_PATH = self._CACHE_DIR / "CORPCODE.xml"
+
         self._force_download = force_download
         self._target_companies_path = target_companies_path
         self._ensure_data()
