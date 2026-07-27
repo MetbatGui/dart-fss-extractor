@@ -329,6 +329,15 @@ class DartFinancialAdapter(FinancialStatementPort, ApiFinancialCollectorPort):
                 
                 disclosures = data.get("list", [])
                 all_disclosures.extend(disclosures)
+
+                # 마지막 페이지에 도달하면 종료 (status가 "013"으로 떨어지지 않는 응답 대비)
+                try:
+                    total_page = int(data.get("total_page", page_no))
+                except (TypeError, ValueError):
+                    total_page = page_no
+                if page_no >= total_page:
+                    break
+
                 page_no += 1
             except Exception as e:
                 logger.error(f"DART 공시목록 조회 중 예외 발생: {e}")
