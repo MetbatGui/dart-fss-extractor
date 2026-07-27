@@ -79,7 +79,7 @@ def test_parse_report_period(service):
     assert r6["is_amendment"] is True
 
 
-def test_collect_daily_disclosures_filtering_and_routing(service, mock_ports):
+def test_collect_daily_disclosures_does_not_fallback_to_api(service, mock_ports):
     """당일 공시 목록 중 대상 기업만 정상 필터링하여 실적을 수집하는 시나리오 검증."""
     cc_port, fin_port, repo_port, cache_port, down_port, parser_port = mock_ports
 
@@ -129,14 +129,16 @@ def test_collect_daily_disclosures_filtering_and_routing(service, mock_ports):
 
     # 3. 단언 검증
     # A사(001)는 수집 성공 큐에 들어가고, B사(002)는 대상 외이므로 스킵되었음을 검증
-    assert result["success"] == ["001"]
-    assert result["failed"] == []
+    assert result["success"] == []
+    assert result["failed"] == ["001"]
     
     # 4개 분기 보고서 조회가 정확히 호출되었는지 확인
-    assert fin_port.get_all_statements.call_count == 4
+    fin_port.get_all_statements.assert_not_called()
     
     # SQLite 저장소 적재(save_partition)가 정상 트리거되었는지 확인
-    repo_port.save_partition.assert_called()
+    repo_port.save_partition.assert_not_called()
+    saved_company = repo_port.save_company_metadata.call_args.args[0]
+    assert saved_company.failed_years == [2026]
 
 
 def test_collect_daily_disclosures_with_local_xbrl_path(service, mock_ports):

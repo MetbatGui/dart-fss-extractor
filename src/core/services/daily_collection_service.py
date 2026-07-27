@@ -9,14 +9,12 @@ import pandas as pd
 from pathlib import Path
 from core.ports.corp_code_port import CorpCodePort
 from core.ports.financial_statement_port import FinancialStatementPort
-from core.ports.api_financial_collector_port import ApiFinancialCollectorPort
 from core.ports.xbrl_financial_collector_port import XbrlFinancialCollectorPort
 from core.ports.repository_port import RepositoryPort
 from core.ports.cache_port import CachePort
 from core.ports.download_port import DownloadPort
 from core.ports.xbrl_parser_port import XbrlParserPort
 from core.domain.models.financial_statement import ReportType, FinancialStatementType
-from core.domain.models.performance_metrics import QuarterlyMetrics
 from core.domain.models.company import Company
 from core.services.data_processing_service import DataProcessingService
 
@@ -43,8 +41,7 @@ class DailyCollectionService:
         download_port: Optional[DownloadPort] = None,
         xbrl_parser_port: Optional[XbrlParserPort] = None,
         processing_service: Optional[DataProcessingService] = None,
-        xbrl_collector_port: Optional[XbrlFinancialCollectorPort] = None,
-        api_collector_port: Optional[ApiFinancialCollectorPort] = None
+        xbrl_collector_port: Optional[XbrlFinancialCollectorPort] = None
     ):
         self._corp_code_port = corp_code_port
         self._financial_port = financial_port
@@ -54,7 +51,6 @@ class DailyCollectionService:
         self._xbrl_parser_port = xbrl_parser_port
         self._processing_service = processing_service or DataProcessingService()
         self._xbrl_collector_port = xbrl_collector_port
-        self._api_collector_port = api_collector_port
 
     def collect_daily_disclosures(
         self,
@@ -136,7 +132,7 @@ class DailyCollectionService:
                     settlement_month = 12
                 company = Company(code=corp_code, name=corp_name, settlement_month=settlement_month)
                 self._repository_port.save_company_metadata(company)
-            
+
             settlement_month = company.settlement_month
 
             # 4. 공시 시기(연도, 분기) 및 정정 여부 동적 분석
@@ -217,7 +213,7 @@ class DailyCollectionService:
             return None
 
         report_type, quarter_str = period
-        
+
         # 결산월이 12월이면 연도 변환 불필요
         if settlement_month == 12:
             fiscal_year = year_in_title
@@ -230,7 +226,7 @@ class DailyCollectionService:
             else:
                 # 공시 기준월이 결산월 이하인 경우(해를 넘겨 공시된 경우), 회기가 시작한 해는 공시 연도 - 1
                 fiscal_year = year_in_title - 1
-        
+
         # 정정 여부 판별 (제목 내 기재정정/정정 텍스트 혹은 비고 필드 '정' 마크)
         is_amendment = "[기재정정]" in report_nm or "정정" in report_nm or "정" in rm.strip()
 
@@ -250,7 +246,11 @@ class DailyCollectionService:
         is_amendment: bool,
         rcept_no: str
     ) -> bool:
-        """단일 공시 건에 대해 로컬 파싱 및 API Fallback 수집을 조율하고 SQLite DB에 저장합니다."""
+        """단일 공시 건의 XBRL 데이터를 수집해 SQLite DB에 저장합니다.
+
+        정기 수집에서는 OpenDART 재무제표 API로 폴백하지 않습니다. XBRL을
+        다운로드하거나 파싱하지 못하면 실패 이력을 남겨 다음 실행에서 재시도합니다.
+        """
         try:
             # 1. 기업 메타데이터 로드 또는 생성
             company = self._repository_port.load_company_metadata(corp_code)
@@ -338,7 +338,7 @@ class DailyCollectionService:
                     # 캘린더 분기 보정
                     c_year = year
                     c_quarter = quarter
-                    
+
                     if company.settlement_month != 12:
                         try:
                             quarter_num = int(quarter[0])  # "1Q" -> 1
@@ -346,7 +346,7 @@ class DailyCollectionService:
                             if calendar_month == 0:
                                 calendar_month = 12
                             c_quarter = f"{(calendar_month - 1) // 3 + 1}Q"
-                            
+
                             if calendar_month > company.settlement_month:
                                 c_year = year - 1
                         except Exception as e:
@@ -386,110 +386,14 @@ class DailyCollectionService:
                 logger.info(f"  ✅ [{corp_name}] 로컬 XBRL 기반으로 {year}년 재무 정보 적재 완료")
                 return True
 
-            # 5. Fallback: 로컬 파싱 실패 또는 원본 다운로드 실패 시 OpenDART API Fallback 기동
-            logger.warning(f"  ⚠️ [{corp_name}] 로컬 파싱 불가. OpenDART API Fallback을 가동합니다.")
-            
-            statements_by_type = {
-                FinancialStatementType.CONSOLIDATED: [],
-                FinancialStatementType.SEPARATE: []
-            }
-            
-            collector = self._api_collector_port or self._financial_port
-            if not collector:
-                logger.warning(f"  ⚠️ [{corp_name}] 로컬 파싱 불가 및 API 수집 어댑터 미설정으로 수집 실패.")
-                company.mark_failure(year)
-                self._repository_port.save_company_metadata(company)
-                return False
-
-            import time
-            for q_num in [1, 2, 3, 4]:
-                q_rep_type = {1: ReportType.Q1, 2: ReportType.SEMI_ANNUAL, 3: ReportType.Q3, 4: ReportType.ANNUAL}[q_num]
-                time.sleep(0.1)
-                
-                results = collector.get_all_statements(corp_code, year, q_rep_type)
-                statements_by_type[FinancialStatementType.CONSOLIDATED].append(results.get(FinancialStatementType.CONSOLIDATED))
-                statements_by_type[FinancialStatementType.SEPARATE].append(results.get(FinancialStatementType.SEPARATE))
-
-            has_any_data = any(statements_by_type[FinancialStatementType.CONSOLIDATED]) or any(statements_by_type[FinancialStatementType.SEPARATE])
-            if not has_any_data:
-                logger.warning(f"  ❌ [{corp_name}] Fallback API에서도 {year}년 재무보고서 데이터를 찾지 못했습니다.")
-                company.mark_failure(year)
-                self._repository_port.save_company_metadata(company)
-                return False
-
-            for fs_type in [FinancialStatementType.CONSOLIDATED, FinancialStatementType.SEPARATE]:
-                type_label = "cfs" if fs_type == FinancialStatementType.CONSOLIDATED else "ofs"
-                type_statements = statements_by_type[fs_type]
-                if not any(type_statements):
-                    continue
-                
-                metrics = QuarterlyMetrics.calculate_from_statements(
-                    corp_name=corp_name,
-                    q1_stmt=type_statements[0],
-                    semi_stmt=type_statements[1],
-                    q3_stmt=type_statements[2],
-                    annual_stmt=type_statements[3],
-                    revenue_kws=self._processing_service.REVENUE_KEYWORDS,
-                    op_profit_kws=self._processing_service.OP_PROFIT_KEYWORDS,
-                    net_income_kws=self._processing_service.NET_INCOME_KEYWORDS,
-                    target_fs_type=fs_type
-                )
-
-                quarter_rows = []
-                for q_str in ["1Q", "2Q", "3Q", "4Q"]:
-                    m = metrics.metrics_by_quarter.get(q_str)
-                    if m and m.is_valid:
-                        c_year = year
-                        c_quarter = q_str
-                        if company.settlement_month != 12:
-                            try:
-                                quarter_num = int(q_str[0])
-                                calendar_month = (company.settlement_month + quarter_num * 3) % 12
-                                if calendar_month == 0:
-                                    calendar_month = 12
-                                c_quarter = f"{(calendar_month - 1) // 3 + 1}Q"
-                                if calendar_month > company.settlement_month:
-                                    c_year = year - 1
-                            except Exception as e:
-                                logger.error(f"[{corp_name}] Fallback 캘린더 분기 보정 중 오류: {e}")
-
-                        quarter_rows.append({
-                            "기업명": corp_name,
-                            "연도": c_year,
-                            "구분": "분기",
-                            "분기": c_quarter,
-                            "구분_상세": "연결" if fs_type == FinancialStatementType.CONSOLIDATED else "개별",
-                            "매출액": m.revenue,
-                            "영업이익": m.operating_profit,
-                            "당기순이익": m.net_income
-                        })
-
-                if metrics.annual_metrics and metrics.annual_metrics.is_valid:
-                    quarter_rows.append({
-                        "기업명": corp_name,
-                        "연도": year,
-                        "구분": "연간",
-                        "분기": "연간",
-                        "구분_상세": "연결" if fs_type == FinancialStatementType.CONSOLIDATED else "개별",
-                        "매출액": metrics.annual_metrics.revenue,
-                        "영업이익": metrics.annual_metrics.operating_profit,
-                        "당기순이익": metrics.annual_metrics.net_income
-                    })
-
-                if quarter_rows:
-                    df = pd.DataFrame(quarter_rows)
-                    dataset_name = f"financial_data_{type_label}"
-                    self._repository_port.save_partition(dataset_name, corp_code, df)
-
-            company.mark_success(year)
+            logger.warning(f"  ❌ [{corp_name}] XBRL 데이터를 수집하지 못했습니다. API 폴백 없이 다음 실행에서 재시도합니다.")
+            company.mark_failure(year)
             self._repository_port.save_company_metadata(company)
-            logger.info(f"  ✅ [{corp_name}] Fallback API 기반으로 {year}년 재무 정보 적재 완료")
-            return True
-
-        except Exception as e:
-            logger.error(f"  ❌ [{corp_name}] 수집/적재 도중 오류 발생: {e}")
             return False
 
         except Exception as e:
             logger.error(f"  ❌ [{corp_name}] 수집/적재 도중 오류 발생: {e}")
+            if 'company' in locals():
+                company.mark_failure(year)
+                self._repository_port.save_company_metadata(company)
             return False

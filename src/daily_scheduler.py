@@ -109,8 +109,7 @@ def main():
         financial_port=api_financial_adapter,
         repository_port=repository_adapter,
         processing_service=processing_service,
-        xbrl_collector_port=xbrl_financial_adapter,
-        api_collector_port=api_financial_adapter
+        xbrl_collector_port=xbrl_financial_adapter
     )
 
     # 1. 당일 공시 스캔 및 증분 적재 수행 (SQLite 트랜잭션 수호)
