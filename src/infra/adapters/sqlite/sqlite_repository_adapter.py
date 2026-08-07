@@ -46,6 +46,14 @@ class SqliteRepositoryAdapter(RepositoryPort):
                 with self._conn:
                     self._conn.execute("ALTER TABLE companies ADD COLUMN settlement_month INTEGER DEFAULT 12")
                 logger.info("companies 테이블에 settlement_month 컬럼을 성공적으로 추가했습니다.")
+
+            cursor.execute("PRAGMA table_info(financials)")
+            fin_columns = [row["name"] for row in cursor.fetchall()]
+            if "rcept_no" not in fin_columns:
+                logger.info("financials 테이블에 rcept_no 컬럼이 존재하지 않아 추가 마이그레이션을 시작합니다.")
+                with self._conn:
+                    self._conn.execute("ALTER TABLE financials ADD COLUMN rcept_no TEXT")
+                logger.info("financials 테이블에 rcept_no 컬럼을 성공적으로 추가했습니다.")
         except Exception as e:
             logger.error(f"스키마 마이그레이션 검사 중 실패: {e}")
 
@@ -55,7 +63,13 @@ class SqliteRepositoryAdapter(RepositoryPort):
             self._conn.close()
 
     def save_partition(self, dataset_name: str, partition_name: str, df: pd.DataFrame) -> None:
-        """특정 기업의 실적 DataFrame 데이터를 SQLite에 적재 (INSERT OR REPLACE)."""
+        """특정 기업의 실적 DataFrame 데이터를 SQLite에 적재 (INSERT OR REPLACE).
+
+        df에 'rcept_no'/'is_amendment' 컬럼이 있으면, 정정공시가 아닌데 기존에 저장된 값과
+        다른 접수번호가 같은 (연도, 구분, 분기, 구분_상세) 키를 덮어쓰려는 충돌을 감지해
+        기존 값을 보존하고 경고 로그만 남긴다 (서로 다른 두 공시가 같은 분기 키로 잘못
+        매핑되어 데이터가 조용히 사라지는 것을 방지).
+        """
         if df.empty:
             return
 
@@ -67,15 +81,40 @@ class SqliteRepositoryAdapter(RepositoryPort):
 
         query = """
         INSERT OR REPLACE INTO financials (
-            corp_code, corp_name, year, division, quarter, detail_type, revenue, operating_profit, net_income
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            corp_code, corp_name, year, division, quarter, detail_type, revenue, operating_profit, net_income, rcept_no
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        existing_query = """
+        SELECT rcept_no FROM financials
+        WHERE corp_code = ? AND year = ? AND division = ? AND quarter = ? AND detail_type = ?
         """
 
         with self._conn:
             for _, row in df.iterrows():
                 # 데이터프레임 내에 '구분_상세' 열이 존재하면 이를 우선 사용
                 row_detail = row.get("구분_상세", detail_type)
-                
+                year = int(row.get("연도"))
+                division = str(row.get("구분"))
+                quarter = str(row.get("분기"))
+                rcept_no = row.get("rcept_no")
+                rcept_no = str(rcept_no) if rcept_no is not None and not pd.isna(rcept_no) else None
+                is_amendment = bool(row.get("is_amendment", False))
+
+                if rcept_no and not is_amendment:
+                    cursor = self._conn.execute(
+                        existing_query, (partition_name, year, division, quarter, row_detail)
+                    )
+                    existing = cursor.fetchone()
+                    existing_rcept_no = existing["rcept_no"] if existing else None
+                    if existing_rcept_no and existing_rcept_no != rcept_no:
+                        logger.error(
+                            f"[충돌 감지] {partition_name} {year}년 {quarter}({row_detail})에 "
+                            f"이미 다른 공시(rcept_no={existing_rcept_no})의 값이 저장되어 있는데, "
+                            f"정정이 아닌 별개 공시(rcept_no={rcept_no})가 같은 기간 키로 덮어쓰려 했습니다. "
+                            f"기존 값을 보존하고 이번 값은 건너뜁니다."
+                        )
+                        continue
+
                 # float 결측치 처리 (NaN -> None)
                 def clean_val(v):
                     return None if pd.isna(v) else float(v)
@@ -83,13 +122,14 @@ class SqliteRepositoryAdapter(RepositoryPort):
                 self._conn.execute(query, (
                     partition_name,                    # corp_code
                     str(row.get("기업명")),
-                    int(row.get("연도")),
-                    str(row.get("구분")),
-                    str(row.get("분기")),
+                    year,
+                    division,
+                    quarter,
                     row_detail,
                     clean_val(row.get("매출액")),
                     clean_val(row.get("영업이익")),
-                    clean_val(row.get("당기순이익"))
+                    clean_val(row.get("당기순이익")),
+                    rcept_no
                 ))
 
     def load_partition(self, dataset_name: str, partition_name: str) -> pd.DataFrame:
@@ -99,9 +139,10 @@ class SqliteRepositoryAdapter(RepositoryPort):
             detail_type = "개별"
 
         query = """
-        SELECT corp_name AS 기업명, year AS 연도, division AS 구분, 
-               quarter AS 분기, detail_type AS 구분_상세, 
-               revenue AS 매출액, operating_profit AS 영업이익, net_income AS 당기순이익
+        SELECT corp_name AS 기업명, year AS 연도, division AS 구분,
+               quarter AS 분기, detail_type AS 구분_상세,
+               revenue AS 매출액, operating_profit AS 영업이익, net_income AS 당기순이익,
+               rcept_no
         FROM financials
         WHERE corp_code = ? AND detail_type = ?
         ORDER BY year ASC, quarter ASC
@@ -128,9 +169,10 @@ class SqliteRepositoryAdapter(RepositoryPort):
             detail_type = "개별"
 
         query = """
-        SELECT corp_code AS 종목코드, corp_name AS 기업명, year AS 연도, division AS 구분, 
-               quarter AS 분기, detail_type AS 구분_상세, 
-               revenue AS 매출액, operating_profit AS 영업이익, net_income AS 당기순이익
+        SELECT corp_code AS 종목코드, corp_name AS 기업명, year AS 연도, division AS 구분,
+               quarter AS 분기, detail_type AS 구분_상세,
+               revenue AS 매출액, operating_profit AS 영업이익, net_income AS 당기순이익,
+               rcept_no
         FROM financials
         WHERE detail_type = ?
         ORDER BY corp_name ASC, year ASC, quarter ASC

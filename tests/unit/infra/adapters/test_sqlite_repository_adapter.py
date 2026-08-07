@@ -75,6 +75,82 @@ def test_sqlite_partition_dataframe_ops(adapter):
     assert row_2q["영업이익"] == 250
 
 
+def test_sqlite_partition_conflict_different_disclosure_not_amendment_preserves_existing(adapter):
+    """서로 다른 rcept_no(공시)가 같은 분기 키를 가리키는데 정정이 아니면, 기존 값을 보존해야 한다.
+
+    시나리오: 3월 공시(rcept_no=A)가 이미 저장돼 있는데, 파싱 오류 등으로 6월 공시(rcept_no=B,
+    정정 아님)가 같은 (연도, 분기) 키로 잘못 매핑되어 들어오는 경우 - 기존 3월 데이터가
+    조용히 사라지면 안 된다.
+    """
+    dataset = "financial_data_cfs"
+
+    df_original = pd.DataFrame([
+        {"기업명": "테스트기업", "연도": 2026, "구분": "분기", "분기": "1Q",
+         "매출액": 1000, "영업이익": 100, "당기순이익": 80,
+         "rcept_no": "20260101000001", "is_amendment": False},
+    ])
+    adapter.save_partition(dataset, "999999", df_original)
+
+    df_conflicting = pd.DataFrame([
+        {"기업명": "테스트기업", "연도": 2026, "구분": "분기", "분기": "1Q",
+         "매출액": 9999, "영업이익": 999, "당기순이익": 999,
+         "rcept_no": "20260601000002", "is_amendment": False},
+    ])
+    adapter.save_partition(dataset, "999999", df_conflicting)
+
+    loaded_df = adapter.load_partition(dataset, "999999")
+    row = loaded_df[loaded_df["분기"] == "1Q"].iloc[0]
+    assert row["매출액"] == 1000  # 원본(A) 값이 그대로 보존되어야 함
+    assert row["rcept_no"] == "20260101000001"
+
+
+def test_sqlite_partition_amendment_overwrites_despite_different_rcept_no(adapter):
+    """진짜 정정공시(is_amendment=True)는 rcept_no가 달라도 정상적으로 덮어써야 한다."""
+    dataset = "financial_data_cfs"
+
+    df_original = pd.DataFrame([
+        {"기업명": "테스트기업", "연도": 2026, "구분": "분기", "분기": "1Q",
+         "매출액": 1000, "영업이익": 100, "당기순이익": 80,
+         "rcept_no": "20260101000001", "is_amendment": False},
+    ])
+    adapter.save_partition(dataset, "999999", df_original)
+
+    df_amendment = pd.DataFrame([
+        {"기업명": "테스트기업", "연도": 2026, "구분": "분기", "분기": "1Q",
+         "매출액": 1500, "영업이익": 150, "당기순이익": 120,
+         "rcept_no": "20260315000003", "is_amendment": True},
+    ])
+    adapter.save_partition(dataset, "999999", df_amendment)
+
+    loaded_df = adapter.load_partition(dataset, "999999")
+    row = loaded_df[loaded_df["분기"] == "1Q"].iloc[0]
+    assert row["매출액"] == 1500
+    assert row["rcept_no"] == "20260315000003"
+
+
+def test_sqlite_partition_same_rcept_no_reprocess_overwrites(adapter):
+    """같은 공시(rcept_no 동일)를 재처리하는 경우는 충돌이 아니라 정상 재저장이어야 한다."""
+    dataset = "financial_data_cfs"
+
+    df_first = pd.DataFrame([
+        {"기업명": "테스트기업", "연도": 2026, "구분": "분기", "분기": "1Q",
+         "매출액": 1000, "영업이익": 100, "당기순이익": 80,
+         "rcept_no": "20260101000001", "is_amendment": False},
+    ])
+    adapter.save_partition(dataset, "999999", df_first)
+
+    df_rerun = pd.DataFrame([
+        {"기업명": "테스트기업", "연도": 2026, "구분": "분기", "분기": "1Q",
+         "매출액": 1000, "영업이익": 100, "당기순이익": 80,
+         "rcept_no": "20260101000001", "is_amendment": False},
+    ])
+    adapter.save_partition(dataset, "999999", df_rerun)
+
+    loaded_df = adapter.load_partition(dataset, "999999")
+    assert len(loaded_df) == 1
+    assert loaded_df.iloc[0]["매출액"] == 1000
+
+
 def test_sqlite_find_missing_companies(adapter):
     """특정 연도/분기 실적이 누락된 기업 색출 고속 쿼리 기능 검증."""
     # 1. 기업 메타데이터 3개 입력

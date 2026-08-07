@@ -298,9 +298,11 @@ class DailyCollectionService:
                         "구분_상세": "연결" if fs_type == FinancialStatementType.CONSOLIDATED else "개별",
                         "매출액": int(rev_amount) if not rev_amount.is_none else None,
                         "영업이익": int(op_amount) if not op_amount.is_none else None,
-                        "당기순이익": int(ni_amount) if not ni_amount.is_none else None
+                        "당기순이익": int(ni_amount) if not ni_amount.is_none else None,
+                        "rcept_no": rcept_no,
+                        "is_amendment": is_amendment
                     })
-                    
+
                     # 연간 데이터 구성 (사업보고서인 경우 추가 적재)
                     if rep_type == ReportType.ANNUAL:
                         quarter_rows.append({
@@ -311,7 +313,9 @@ class DailyCollectionService:
                             "구분_상세": "연결" if fs_type == FinancialStatementType.CONSOLIDATED else "개별",
                             "매출액": int(rev_amount) if not rev_amount.is_none else None,
                             "영업이익": int(op_amount) if not op_amount.is_none else None,
-                            "당기순이익": int(ni_amount) if not ni_amount.is_none else None
+                            "당기순이익": int(ni_amount) if not ni_amount.is_none else None,
+                            "rcept_no": rcept_no,
+                            "is_amendment": is_amendment
                         })
 
                     if quarter_rows:

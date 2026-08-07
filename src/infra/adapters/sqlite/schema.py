@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS financials (
     revenue REAL,                 -- 매출액 (원 단위 또는 정밀도 보존용 실수)
     operating_profit REAL,        -- 영업이익
     net_income REAL,              -- 당기순이익
+    rcept_no TEXT,                -- 이 값의 출처 공시 접수번호 (원본 추적/충돌 판별용)
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(corp_code) REFERENCES companies(corp_code)
 );
