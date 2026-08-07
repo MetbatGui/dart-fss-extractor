@@ -40,7 +40,13 @@ class Company:
         self.last_updated = datetime.now().isoformat()
 
     def to_calendar_period(self, fiscal_year: int, fiscal_quarter: str) -> Tuple[int, str]:
-        """결산월 기준 회계연도/분기를 캘린더 연도/분기로 변환합니다."""
+        """결산월 기준 회계연도/분기를 캘린더 연도/분기로 변환합니다.
+
+        fiscal_year는 DisclosurePeriod가 판별하는 "회계연도가 시작한 캘린더 연도"를 뜻한다
+        (예: 3월 결산 기업의 회계연도는 4월에 시작하므로, fiscal_year=2026이면 2026년 4월 시작).
+        회기 시작월(settlement_month+1)보다 같거나 이후 달에 끝나는 분기는 같은 해에 속하고,
+        해를 넘겨 끝나는 분기(예: 4Q가 1~3월에 끝나는 경우)는 fiscal_year+1에 속한다.
+        """
         if self.settlement_month == 12:
             return fiscal_year, fiscal_quarter
 
@@ -50,9 +56,8 @@ class Company:
             calendar_month = 12
         calendar_quarter = f"{(calendar_month - 1) // 3 + 1}Q"
 
-        calendar_year = fiscal_year
-        if calendar_month > self.settlement_month:
-            calendar_year = fiscal_year - 1
+        start_month = (self.settlement_month % 12) + 1
+        calendar_year = fiscal_year if calendar_month >= start_month else fiscal_year + 1
 
         return calendar_year, calendar_quarter
 

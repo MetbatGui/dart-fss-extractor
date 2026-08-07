@@ -168,6 +168,35 @@ def test_quarterly_metrics_annual_sum():
     assert annual_sum.net_income == Amount(800)
 
 
+def test_quarterly_metrics_skips_4q_on_fiscal_period_mismatch():
+    """연간 보고서와 3Q 누적 원본 보고서의 회계기수가 다르면(예: 리츠 등 비정형 결산) 4Q 역산을 건너뛰는지 검증."""
+    from core.domain.models.performance_metrics import QuarterlyMetrics
+
+    # 1Q/3Q 공시가 없는 회사 (반기/사업보고서만 존재) - 반기는 "제 8 기", 연간은 "제 7 기"로 회계기수가 어긋남
+    semi = FinancialStatement("01622720", "리츠", 2026, ReportType.SEMI_ANNUAL, FinancialStatementType.CONSOLIDATED, [
+        AccountItem("매출액", "15,000", "25,000", period_name="제 8 기 반기"),
+        AccountItem("영업이익", "1,500", "2,500", period_name="제 8 기 반기"),
+    ])
+    annual = FinancialStatement("01622720", "리츠", 2026, ReportType.ANNUAL, FinancialStatementType.CONSOLIDATED, [
+        AccountItem("매출액", "60,000", "60,000", period_name="제 7 기"),
+        AccountItem("영업이익", "6,000", "6,000", period_name="제 7 기"),
+    ])
+
+    metrics = QuarterlyMetrics.calculate_from_statements(
+        corp_name="리츠",
+        q1_stmt=None,
+        semi_stmt=semi,
+        q3_stmt=None,
+        annual_stmt=annual,
+        revenue_kws=["매출액"],
+        op_profit_kws=["영업이익"],
+        net_income_kws=["당기순이익"]
+    )
+
+    # 회계기수가 어긋나므로 60,000 - 25,000 = 35,000 같은 오염된 값이 나오면 안 되고 None이어야 함
+    assert metrics.metrics_by_quarter["4Q"].revenue is None
+
+
 def test_financial_statement_scale_normalization_edge_cases():
     """모든 값이 0원이거나 빈 계정과목을 갖는 보고서 유입 시 예외(math domain error) 없이 스킵되는지 검증."""
     # 1. 0원 스케일 보고서 모사 ( abs(int(amount)) 가 0보다 큰 수치만 scales 리스트에 들어가며, 이 조건 하에 scales 리스트가 빈 상태가 됨 )

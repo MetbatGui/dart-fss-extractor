@@ -1,6 +1,7 @@
 """성적표 및 재무 지표 모델 - 풍부한 도메인 행동 및 완벽한 하위 호환성(LSP) 보장 구현."""
 
 import logging
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Dict, Optional, List
@@ -9,6 +10,28 @@ from core.domain.models.amount import Amount
 from core.domain.models.financial_statement import FinancialStatement, FinancialStatementType
 
 logger = logging.getLogger(__name__)
+
+_FISCAL_PERIOD_RE = re.compile(r'제\s*(\d+)\s*기')
+
+
+def _fiscal_period_no(stmt: Optional[FinancialStatement]) -> Optional[int]:
+    """계정 기간명(예: "제 8 기 반기")에서 회계기수를 추출합니다. 판별 불가 시 None."""
+    if not stmt:
+        return None
+    for item in stmt.accounts:
+        if item.period_name:
+            m = _FISCAL_PERIOD_RE.search(item.period_name)
+            if m:
+                return int(m.group(1))
+    return None
+
+
+def _same_fiscal_period(a: Optional[FinancialStatement], b: Optional[FinancialStatement]) -> bool:
+    """두 재무제표의 회계기수가 같은지 확인합니다. 기수 판별이 불가하면 안전하게 True(허용)를 반환합니다."""
+    pa, pb = _fiscal_period_no(a), _fiscal_period_no(b)
+    if pa is None or pb is None:
+        return True
+    return pa == pb
 
 
 @dataclass
@@ -215,7 +238,16 @@ class QuarterlyMetrics:
         
         q4_final_single = FinancialMetrics()
         if annual_stmt is not None and ann_cum.revenue is not None and q3_final_cum.revenue is not None:
-            q4_final_single = ann_cum.subtract(q3_final_cum)
+            # 3Q 누적치를 실제로 채운 원본 보고서(q3 > 반기 > 1분기 순 폴백)와 연간보고서의 회계기수 일치 검증
+            q3_cum_source_stmt = q3_stmt or semi_stmt or q1_stmt
+            if _same_fiscal_period(annual_stmt, q3_cum_source_stmt):
+                q4_final_single = ann_cum.subtract(q3_final_cum)
+            else:
+                logger.info(
+                    f"[{corp_name} 4Q] 연간 보고서와 누적 원본 보고서의 회계기수가 달라 "
+                    f"(annual={_fiscal_period_no(annual_stmt)}기, source={_fiscal_period_no(q3_cum_source_stmt)}기) "
+                    f"4Q 역산을 건너뜁니다."
+                )
 
         metrics = {
             "1Q": q1_final_single.sanitize("1Q", corp_name),

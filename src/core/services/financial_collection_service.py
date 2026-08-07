@@ -258,22 +258,14 @@ class FinancialCollectionService:
         for q in ["1Q", "2Q", "3Q", "4Q"]:
             m = metrics.metrics_by_quarter.get(q)
             if m:
-                # 캘린더 분기 보정
-                calendar_year = year
-                calendar_quarter = q
-                
-                if settlement_month != 12:
-                    try:
-                        quarter_num = int(q[0])  # "1Q" -> 1
-                        calendar_month = (settlement_month + quarter_num * 3) % 12
-                        if calendar_month == 0:
-                            calendar_month = 12
-                        calendar_quarter = f"{(calendar_month - 1) // 3 + 1}Q"
-                        
-                        if calendar_month > settlement_month:
-                            calendar_year = year - 1
-                    except Exception as e:
-                        logger.error(f"[{name}] 캘린더 분기 보정 계산 중 오류: {e}")
+                # 캘린더 분기 보정 (Company.to_calendar_period에 위임하여 로직 중복/불일치 방지)
+                try:
+                    calendar_year, calendar_quarter = Company(
+                        code="", name=name, settlement_month=settlement_month
+                    ).to_calendar_period(year, q)
+                except Exception as e:
+                    logger.error(f"[{name}] 캘린더 분기 보정 계산 중 오류: {e}")
+                    calendar_year, calendar_quarter = year, q
 
                 data_list.append({
                     "기업명": name,
