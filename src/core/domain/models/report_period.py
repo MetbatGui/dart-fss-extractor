@@ -1,7 +1,6 @@
 import re
 from dataclasses import dataclass
 from datetime import date
-from typing import Optional
 
 # 기간 코드 → (분기 번호, 한글 레이블, YTD 개월수)
 _PERIOD_CODE_MAP = {
@@ -11,17 +10,19 @@ _PERIOD_CODE_MAP = {
     "FY": (4, "4Q", 12),
 }
 
+
 @dataclass
 class XbrlReportPeriod:
     """XBRL 한 공시의 당기(CFY) 기간 메타데이터."""
-    quarter: int          # 1=1분기(1Q), 2=반기(2Q), 3=3분기(3Q), 4=사업보고서(4Q)
-    quarter_label: str    # "1Q" | "2Q" | "3Q" | "4Q"
-    period_months: int    # YTD 누적 개월수 (3 / 6 / 9 / 12)
-    start_date: date      # YTD 누적 시작일
-    end_date: date        # 보고서 마감일
+
+    quarter: int  # 1=1분기(1Q), 2=반기(2Q), 3=3분기(3Q), 4=사업보고서(4Q)
+    quarter_label: str  # "1Q" | "2Q" | "3Q" | "4Q"
+    period_months: int  # YTD 누적 개월수 (3 / 6 / 9 / 12)
+    start_date: date  # YTD 누적 시작일
+    end_date: date  # 보고서 마감일
 
 
-def parse_period_code(ctx_id: str) -> Optional[str]:
+def parse_period_code(ctx_id: str) -> str | None:
     """
     Context ID에서 기간 코드(FQ / HY / TQ / FY)를 추출합니다.
     CFY 기준 duration + Accumulated 컨텍스트만 대상으로 합니다.
@@ -40,7 +41,7 @@ class XbrlPeriodParser:
     """XBRL context 구조를 분석하여 보고서 기간 메타데이터를 추출합니다."""
 
     @staticmethod
-    def extract_period(root_element, namespaces: dict) -> Optional[XbrlReportPeriod]:
+    def extract_period(root_element, namespaces: dict) -> XbrlReportPeriod | None:
         """CFY + A suffix 컨텍스트에서 기간 정보를 추출합니다."""
         for ctx in root_element.findall(".//xbrli:context", namespaces):
             ctx_id = ctx.get("id", "")
@@ -65,7 +66,9 @@ class XbrlPeriodParser:
             quarter, label, months = _PERIOD_CODE_MAP[period_code]
 
             # 실제 날짜 기간 계산
-            actual_months = (e_date.year - s_date.year) * 12 + (e_date.month - s_date.month) + 1
+            actual_months = (
+                (e_date.year - s_date.year) * 12 + (e_date.month - s_date.month) + 1
+            )
 
             return XbrlReportPeriod(
                 quarter=quarter,

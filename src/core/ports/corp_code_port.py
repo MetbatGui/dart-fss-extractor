@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 
 class CorpCodePort(ABC):
@@ -11,7 +11,7 @@ class CorpCodePort(ABC):
     """
 
     @abstractmethod
-    def get_code(self, company_name: str) -> Optional[str]:
+    def get_code(self, company_name: str) -> str | None:
         """단일 기업명의 코드를 조회한다.
 
         Args:
@@ -23,7 +23,7 @@ class CorpCodePort(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_codes(self, company_names: Sequence[str]) -> list[Optional[str]]:
+    def get_codes(self, company_names: Sequence[str]) -> list[str | None]:
         """기업명 리스트에 대한 코드 리스트를 반환한다.
 
         Args:

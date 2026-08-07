@@ -26,10 +26,7 @@ class DisclosurePeriod:
 
     @classmethod
     def from_report_title(
-        cls,
-        report_nm: str,
-        settlement_month: int = 12,
-        rm: str = ""
+        cls, report_nm: str, settlement_month: int = 12, rm: str = ""
     ) -> Optional["DisclosurePeriod"]:
         """보고서 제목 및 비고 필드에서 실제 DART 기준 대상 연도, 분기, 정정 여부를 판별합니다."""
         # 괄호 안의 YYYY.MM 패턴 검색
@@ -65,11 +62,13 @@ class DisclosurePeriod:
                 fiscal_year = year_in_title - 1
 
         # 정정 여부 판별 (제목 내 기재정정/정정 텍스트 혹은 비고 필드 '정' 마크)
-        is_amendment = "[기재정정]" in report_nm or "정정" in report_nm or "정" in rm.strip()
+        is_amendment = (
+            "[기재정정]" in report_nm or "정정" in report_nm or "정" in rm.strip()
+        )
 
         return cls(
             year=fiscal_year,
             quarter=quarter_str,
             report_type=report_type,
-            is_amendment=is_amendment
+            is_amendment=is_amendment,
         )

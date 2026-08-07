@@ -2,7 +2,7 @@
 
 import re
 from decimal import Decimal
-from typing import Optional, Any, Union
+from typing import Any, Union
 
 
 class Amount:
@@ -13,11 +13,11 @@ class Amount:
     - 하위 호환성을 위해 int, float, str 변환 및 연산자 오버로딩을 제공합니다.
     """
 
-    def __init__(self, value: Optional[Union[int, float, Decimal, str, 'Amount']] = None):
-        self._value: Optional[Decimal] = self._parse_value(value)
+    def __init__(self, value: Union[float, Decimal, str, "Amount", None] = None):
+        self._value: Decimal | None = self._parse_value(value)
 
     @property
-    def value(self) -> Optional[Decimal]:
+    def value(self) -> Decimal | None:
         """내부 Decimal 값 반환 (결측 시 None)."""
         return self._value
 
@@ -26,20 +26,20 @@ class Amount:
         """결측치 여부 확인."""
         return self._value is None
 
-    def _parse_value(self, val: Any) -> Optional[Decimal]:
+    def _parse_value(self, val: Any) -> Decimal | None:
         if val is None:
             return None
         if isinstance(val, Amount):
             return val.value
         if isinstance(val, (int, float, Decimal)):
             return Decimal(str(val))
-        
+
         # 문자열 파싱
         if isinstance(val, str):
             clean_str = val.strip()
             if clean_str in ("", "-", "None", "NaN"):
                 return None
-            
+
             # 숫자, 소수점, 음수 기호만 추출
             clean_str = re.sub(r"[^\d.-]", "", clean_str)
             if not clean_str or clean_str == "." or clean_str == "-":
@@ -50,13 +50,13 @@ class Amount:
                 return None
         return None
 
-    def scale(self, factor: Union[int, float, Decimal]) -> 'Amount':
+    def scale(self, factor: float | Decimal) -> "Amount":
         """스케일을 조정하여 새로운 Amount 객체를 반환합니다."""
         if self.is_none:
             return Amount(None)
         return Amount(self._value * Decimal(str(factor)))
 
-    def __add__(self, other: Any) -> 'Amount':
+    def __add__(self, other: Any) -> "Amount":
         other_val = Amount(other)
         if self.is_none:
             return other_val
@@ -64,7 +64,7 @@ class Amount:
             return self
         return Amount(self._value + other_val.value)
 
-    def __sub__(self, other: Any) -> 'Amount':
+    def __sub__(self, other: Any) -> "Amount":
         other_val = Amount(other)
         if self.is_none and other_val.is_none:
             return Amount(None)
@@ -74,7 +74,7 @@ class Amount:
             return self
         return Amount(self._value - other_val.value)
 
-    def __mul__(self, other: Any) -> 'Amount':
+    def __mul__(self, other: Any) -> "Amount":
         if self.is_none:
             return Amount(None)
         if isinstance(other, Amount):
@@ -86,7 +86,7 @@ class Amount:
         except Exception:
             return Amount(None)
 
-    def __truediv__(self, other: Any) -> 'Amount':
+    def __truediv__(self, other: Any) -> "Amount":
         if self.is_none:
             return Amount(None)
         if isinstance(other, Amount):
@@ -101,7 +101,7 @@ class Amount:
         except Exception:
             return Amount(None)
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         other_val = Amount(other)
         return self._value == other_val.value
 
@@ -129,12 +129,12 @@ class Amount:
             return False
         return self._value >= other_val.value
 
-    def __neg__(self) -> 'Amount':
+    def __neg__(self) -> "Amount":
         if self.is_none:
             return Amount(None)
         return Amount(-self._value)
 
-    def __abs__(self) -> 'Amount':
+    def __abs__(self) -> "Amount":
         if self.is_none:
             return Amount(None)
         return Amount(abs(self._value))
@@ -158,4 +158,4 @@ class Amount:
         return str(self._value)
 
     def __repr__(self) -> str:
-        return f"Amount({str(self)})"
+        return f"Amount({self!s})"

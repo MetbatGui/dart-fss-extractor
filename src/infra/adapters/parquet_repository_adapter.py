@@ -2,11 +2,11 @@
 
 import json
 from pathlib import Path
-from typing import Optional
+
 import pandas as pd
 
-from core.ports.repository_port import RepositoryPort
 from core.domain.models.company import Company
+from core.ports.repository_port import RepositoryPort
 
 
 class ParquetRepositoryAdapter(RepositoryPort):
@@ -28,6 +28,7 @@ class ParquetRepositoryAdapter(RepositoryPort):
         try:
             df.to_parquet(temp_path, index=True)
             import os
+
             os.replace(temp_path, file_path)
         except Exception as e:
             if temp_path.exists():
@@ -81,6 +82,7 @@ class ParquetRepositoryAdapter(RepositoryPort):
             with open(temp_path, "w", encoding="utf-8") as f:
                 json.dump(company.to_dict(), f, ensure_ascii=False, indent=2)
             import os
+
             os.replace(temp_path, file_path)
         except Exception as e:
             if temp_path.exists():
@@ -90,7 +92,7 @@ class ParquetRepositoryAdapter(RepositoryPort):
                     pass
             raise e
 
-    def load_company_metadata(self, code: str) -> Optional[Company]:
+    def load_company_metadata(self, code: str) -> Company | None:
         """기업 메타데이터 로드."""
         dataset_name = "financial_data_raw"
         file_path = self._base_dir / dataset_name / f"{code}_meta.json"

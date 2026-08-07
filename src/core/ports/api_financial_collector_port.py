@@ -1,7 +1,6 @@
 """OpenDART API REST 호출 기반 수집 포트 인터페이스."""
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict
 
 from core.domain.models.financial_statement import (
     FinancialStatement,
@@ -25,17 +24,14 @@ class ApiFinancialCollectorPort(ABC):
         corp_code: str,
         year: int,
         report_type: ReportType,
-        prefer_consolidated: bool = True
-    ) -> Optional[FinancialStatement]:
+        prefer_consolidated: bool = True,
+    ) -> FinancialStatement | None:
         """단일 재무제표 API 조회."""
         raise NotImplementedError
 
     @abstractmethod
     def get_all_statements(
-        self,
-        corp_code: str,
-        year: int,
-        report_type: ReportType
-    ) -> Dict[FinancialStatementType, FinancialStatement]:
+        self, corp_code: str, year: int, report_type: ReportType
+    ) -> dict[FinancialStatementType, FinancialStatement]:
         """연결 및 개별 재무제표를 각각 API로 조회."""
         raise NotImplementedError

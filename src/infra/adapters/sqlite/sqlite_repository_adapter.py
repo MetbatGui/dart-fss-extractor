@@ -1,13 +1,13 @@
 """SQLite 영속성 데이터 저장소 어댑터."""
 
-import sqlite3
 import logging
+import sqlite3
 from pathlib import Path
-from typing import Optional, List
+
 import pandas as pd
 
-from core.ports.repository_port import RepositoryPort
 from core.domain.models.company import Company
+from core.ports.repository_port import RepositoryPort
 from infra.adapters.sqlite.schema import initialize_db
 
 logger = logging.getLogger(__name__)
@@ -15,21 +15,21 @@ logger = logging.getLogger(__name__)
 
 class SqliteRepositoryAdapter(RepositoryPort):
     """SQLite 데이터베이스 영속성 저장소 어댑터 (LSP 준수).
-    
+
     - 기존 Parquet 파티션 입출력 구조와 100% 동일하게 DataFrame 형태로 데이터를 호환시킵니다.
     - 트랜잭션 ACID를 완벽히 보증합니다.
     """
 
     def __init__(self, db_path: str = "data/financial_data.db"):
         self.db_path = db_path
-        
+
         # 인메모리가 아닐 경우 디렉터리 자동 생성
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-            
+
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
-        
+
         # 테이블 및 인덱스 초기화
         initialize_db(self._conn)
         self._migrate_schema_if_needed()
@@ -42,18 +42,30 @@ class SqliteRepositoryAdapter(RepositoryPort):
             cursor.execute("PRAGMA table_info(companies)")
             columns = [row["name"] for row in cursor.fetchall()]
             if "settlement_month" not in columns:
-                logger.info("companies 테이블에 settlement_month 컬럼이 존재하지 않아 추가 마이그레이션을 시작합니다.")
+                logger.info(
+                    "companies 테이블에 settlement_month 컬럼이 존재하지 않아 추가 마이그레이션을 시작합니다."
+                )
                 with self._conn:
-                    self._conn.execute("ALTER TABLE companies ADD COLUMN settlement_month INTEGER DEFAULT 12")
-                logger.info("companies 테이블에 settlement_month 컬럼을 성공적으로 추가했습니다.")
+                    self._conn.execute(
+                        "ALTER TABLE companies ADD COLUMN settlement_month INTEGER DEFAULT 12"
+                    )
+                logger.info(
+                    "companies 테이블에 settlement_month 컬럼을 성공적으로 추가했습니다."
+                )
 
             cursor.execute("PRAGMA table_info(financials)")
             fin_columns = [row["name"] for row in cursor.fetchall()]
             if "rcept_no" not in fin_columns:
-                logger.info("financials 테이블에 rcept_no 컬럼이 존재하지 않아 추가 마이그레이션을 시작합니다.")
+                logger.info(
+                    "financials 테이블에 rcept_no 컬럼이 존재하지 않아 추가 마이그레이션을 시작합니다."
+                )
                 with self._conn:
-                    self._conn.execute("ALTER TABLE financials ADD COLUMN rcept_no TEXT")
-                logger.info("financials 테이블에 rcept_no 컬럼을 성공적으로 추가했습니다.")
+                    self._conn.execute(
+                        "ALTER TABLE financials ADD COLUMN rcept_no TEXT"
+                    )
+                logger.info(
+                    "financials 테이블에 rcept_no 컬럼을 성공적으로 추가했습니다."
+                )
         except Exception as e:
             logger.error(f"스키마 마이그레이션 검사 중 실패: {e}")
 
@@ -62,7 +74,9 @@ class SqliteRepositoryAdapter(RepositoryPort):
         if self._conn:
             self._conn.close()
 
-    def save_partition(self, dataset_name: str, partition_name: str, df: pd.DataFrame) -> None:
+    def save_partition(
+        self, dataset_name: str, partition_name: str, df: pd.DataFrame
+    ) -> None:
         """특정 기업의 실적 DataFrame 데이터를 SQLite에 적재 (INSERT OR REPLACE).
 
         df에 'rcept_no'/'is_amendment' 컬럼이 있으면, 정정공시가 아닌데 기존에 저장된 값과
@@ -97,12 +111,17 @@ class SqliteRepositoryAdapter(RepositoryPort):
                 division = str(row.get("구분"))
                 quarter = str(row.get("분기"))
                 rcept_no = row.get("rcept_no")
-                rcept_no = str(rcept_no) if rcept_no is not None and not pd.isna(rcept_no) else None
+                rcept_no = (
+                    str(rcept_no)
+                    if rcept_no is not None and not pd.isna(rcept_no)
+                    else None
+                )
                 is_amendment = bool(row.get("is_amendment", False))
 
                 if rcept_no and not is_amendment:
                     cursor = self._conn.execute(
-                        existing_query, (partition_name, year, division, quarter, row_detail)
+                        existing_query,
+                        (partition_name, year, division, quarter, row_detail),
                     )
                     existing = cursor.fetchone()
                     existing_rcept_no = existing["rcept_no"] if existing else None
@@ -119,18 +138,21 @@ class SqliteRepositoryAdapter(RepositoryPort):
                 def clean_val(v):
                     return None if pd.isna(v) else float(v)
 
-                self._conn.execute(query, (
-                    partition_name,                    # corp_code
-                    str(row.get("기업명")),
-                    year,
-                    division,
-                    quarter,
-                    row_detail,
-                    clean_val(row.get("매출액")),
-                    clean_val(row.get("영업이익")),
-                    clean_val(row.get("당기순이익")),
-                    rcept_no
-                ))
+                self._conn.execute(
+                    query,
+                    (
+                        partition_name,  # corp_code
+                        str(row.get("기업명")),
+                        year,
+                        division,
+                        quarter,
+                        row_detail,
+                        clean_val(row.get("매출액")),
+                        clean_val(row.get("영업이익")),
+                        clean_val(row.get("당기순이익")),
+                        rcept_no,
+                    ),
+                )
 
     def load_partition(self, dataset_name: str, partition_name: str) -> pd.DataFrame:
         """특정 기업의 적재된 실적 데이터를 판다스 DataFrame으로 가져옵니다."""
@@ -147,7 +169,7 @@ class SqliteRepositoryAdapter(RepositoryPort):
         WHERE corp_code = ? AND detail_type = ?
         ORDER BY year ASC, quarter ASC
         """
-        
+
         df = pd.read_sql_query(query, self._conn, params=[partition_name, detail_type])
         return df
 
@@ -157,7 +179,9 @@ class SqliteRepositoryAdapter(RepositoryPort):
         if "ofs" in dataset_name.lower():
             detail_type = "개별"
 
-        query = "SELECT 1 FROM financials WHERE corp_code = ? AND detail_type = ? LIMIT 1"
+        query = (
+            "SELECT 1 FROM financials WHERE corp_code = ? AND detail_type = ? LIMIT 1"
+        )
         cursor = self._conn.cursor()
         cursor.execute(query, (partition_name, detail_type))
         return cursor.fetchone() is not None
@@ -190,28 +214,33 @@ class SqliteRepositoryAdapter(RepositoryPort):
         VALUES (?, ?, ?, ?, ?, ?)
         """
         with self._conn:
-            self._conn.execute(query, (
-                company.code,
-                company.name,
-                success_str if success_str else None,
-                failed_str if failed_str else None,
-                company.last_updated,
-                company.settlement_month
-            ))
+            self._conn.execute(
+                query,
+                (
+                    company.code,
+                    company.name,
+                    success_str if success_str else None,
+                    failed_str if failed_str else None,
+                    company.last_updated,
+                    company.settlement_month,
+                ),
+            )
 
-    def load_company_metadata(self, code: str) -> Optional[Company]:
+    def load_company_metadata(self, code: str) -> Company | None:
         """기업 상태 및 수집 메타데이터를 DB로부터 조회해 복원합니다."""
         query = "SELECT * FROM companies WHERE corp_code = ?"
         cursor = self._conn.cursor()
         cursor.execute(query, (code,))
         row = cursor.fetchone()
-        
+
         if not row:
             return None
-            
+
         success_years = []
         if row["success_years"]:
-            success_years = [int(y) for y in row["success_years"].split(",") if y.strip()]
+            success_years = [
+                int(y) for y in row["success_years"].split(",") if y.strip()
+            ]
 
         failed_years = []
         if row["failed_years"]:
@@ -231,12 +260,17 @@ class SqliteRepositoryAdapter(RepositoryPort):
             success_years=success_years,
             failed_years=failed_years,
             last_updated=row["last_updated"],
-            settlement_month=settlement_month
+            settlement_month=settlement_month,
         )
 
-
     # --- SQLite 고속 확장 기능 ---
-    def find_missing_companies(self, company_codes: List[str], year: int, quarter: str, detail_type: str = "연결") -> List[str]:
+    def find_missing_companies(
+        self,
+        company_codes: list[str],
+        year: int,
+        quarter: str,
+        detail_type: str = "연결",
+    ) -> list[str]:
         """특정 분기의 실적 수치(매출액 등)가 누락되어(NaN/Null) 수집이 필요한 기업들의 코드 목록을 스캔합니다."""
         if not company_codes:
             return []

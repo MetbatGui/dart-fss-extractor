@@ -1,8 +1,9 @@
 import os
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Optional, Sequence, List
+
 import requests
 
 from core.ports.corp_code_port import CorpCodePort
@@ -23,7 +24,7 @@ class CorpCodeAdapter(CorpCodePort):
         self,
         force_download: bool = False,
         target_companies_path: str = "data/target_companies.csv",
-        cache_dir: Optional[str] = None
+        cache_dir: str | None = None,
     ) -> None:
         """생성자.
 
@@ -35,7 +36,9 @@ class CorpCodeAdapter(CorpCodePort):
         if cache_dir:
             self._CACHE_DIR = Path(cache_dir).resolve()
         else:
-            self._CACHE_DIR = Path(os.getenv("OUTPUT_DIRECTORY", "./data")).resolve() / "corp_code"
+            self._CACHE_DIR = (
+                Path(os.getenv("OUTPUT_DIRECTORY", "./data")).resolve() / "corp_code"
+            )
         self._ZIP_PATH = self._CACHE_DIR / "corpCode.zip"
         self._XML_PATH = self._CACHE_DIR / "CORPCODE.xml"
 
@@ -54,14 +57,12 @@ class CorpCodeAdapter(CorpCodePort):
         타겟 컴퍼니 파일의 수정 시각이 캐시보다 더 최신이면 강제로 재다운로드한다.
         """
         self._CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        
+
         should_download = self._force_download
-        
-        if not self._XML_PATH.is_file():
+
+        if not self._XML_PATH.is_file() or self._XML_PATH.stat().st_size < 1024:
             should_download = True
-        elif self._XML_PATH.stat().st_size < 1024:  # 1KB 미만이면 손상 의심
-            should_download = True
-            
+
         # 타겟 컴퍼니 파일의 수정 시각이 캐시보다 더 최신이면 재다운로드 트리거
         if not should_download and self._XML_PATH.is_file():
             target_path = Path(self._target_companies_path)
@@ -70,13 +71,14 @@ class CorpCodeAdapter(CorpCodePort):
                 cache_mtime = self._XML_PATH.stat().st_mtime
                 if target_mtime > cache_mtime:
                     import logging
+
                     logger = logging.getLogger(__name__)
                     logger.info(
                         f"[캐시 무효화] 타겟 파일({target_path.name})의 변경 시각이 "
                         f"캐시({self._XML_PATH.name})보다 최신입니다. 고유번호를 재다운로드합니다."
                     )
                     should_download = True
-            
+
         if should_download:
             self._download_and_extract()
 
@@ -84,31 +86,37 @@ class CorpCodeAdapter(CorpCodePort):
         """DART API 로부터 ``corpCode.zip`` 을 받아 압축을 푼다."""
         api_key = os.getenv("DART_API_KEY")
         if not api_key:
-            raise EnvironmentError("DART_API_KEY 환경 변수가 설정되지 않았습니다.")
+            raise OSError("DART_API_KEY 환경 변수가 설정되지 않았습니다.")
         url = f"https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key={api_key}"
         response = requests.get(url, timeout=30)
         response.raise_for_status()
-        
+
         # 응답 크기 검증 (너무 작으면 에러)
         if len(response.content) < 1024:
-             raise ValueError(f"다운로드된 파일 크기가 너무 작습니다 ({len(response.content)} bytes). API 키나 요청을 확인하세요.")
+            raise ValueError(
+                f"다운로드된 파일 크기가 너무 작습니다 ({len(response.content)} bytes). API 키나 요청을 확인하세요."
+            )
 
         self._ZIP_PATH.write_bytes(response.content)
         with zipfile.ZipFile(self._ZIP_PATH, "r") as z:
             # zip 안에 CORPCODE.xml 이 하나만 존재한다.
             z.extractall(self._CACHE_DIR)
-        
+
         if not self._XML_PATH.is_file():
-            raise FileNotFoundError("압축 해제 후 CORPCODE.xml 파일을 찾을 수 없습니다.")
-            
+            raise FileNotFoundError(
+                "압축 해제 후 CORPCODE.xml 파일을 찾을 수 없습니다."
+            )
+
         # 압축 해제 후 크기 재검증
         if self._XML_PATH.stat().st_size < 1024:
-             raise ValueError(f"압축 해제된 XML 파일 크기가 너무 작습니다 ({self._XML_PATH.stat().st_size} bytes).")
+            raise ValueError(
+                f"압축 해제된 XML 파일 크기가 너무 작습니다 ({self._XML_PATH.stat().st_size} bytes)."
+            )
 
     def _load_mapping(self, only_listed: bool = False) -> Mapping[str, str]:
         """XML 파일을 파싱해 ``{기업명: 기업코드}`` 사전을 만든다.
-        
-        단, 로컬 매핑 데이터인 'data/corps.csv'가 존재하는 경우 정합성을 위해 
+
+        단, 로컬 매핑 데이터인 'data/corps.csv'가 존재하는 경우 정합성을 위해
         이를 우선적으로 로드하여 사명 매칭 불일치를 원천 방어합니다.
         """
         csv_path = Path("data/corps.csv")
@@ -134,7 +142,7 @@ class CorpCodeAdapter(CorpCodePort):
             name = corp.findtext("corp_name")
             code = corp.findtext("corp_code")
             stock_code = corp.findtext("stock_code")
-            
+
             if name and code:
                 if only_listed:
                     if stock_code and stock_code.strip():
@@ -143,7 +151,7 @@ class CorpCodeAdapter(CorpCodePort):
                     mapping[name] = code
         return mapping
 
-    def get_code(self, company_name: str) -> Optional[str]:
+    def get_code(self, company_name: str) -> str | None:
         """단일 기업명의 코드를 조회한다.
 
         Args:
@@ -154,7 +162,7 @@ class CorpCodeAdapter(CorpCodePort):
         """
         return self._load_mapping().get(company_name)
 
-    def get_codes(self, company_names: Sequence[str]) -> List[Optional[str]]:
+    def get_codes(self, company_names: Sequence[str]) -> list[str | None]:
         """기업명 리스트에 대한 코드 리스트를 반환한다.
 
         Args:

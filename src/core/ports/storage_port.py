@@ -1,9 +1,9 @@
 """파일 데이터를 원격/로컬 스토리지에 저장하고 읽기 위한 포트 인터페이스."""
 
 from abc import ABC, abstractmethod
-from typing import Optional, List
-import pandas as pd
+
 import openpyxl
+import pandas as pd
 
 
 class StoragePort(ABC):
@@ -51,7 +51,7 @@ class StoragePort(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def load_workbook(self, path: str) -> Optional[openpyxl.Workbook]:
+    def load_workbook(self, path: str) -> openpyxl.Workbook | None:
         """Excel Workbook을 로드합니다.
 
         Args:
@@ -87,7 +87,9 @@ class StoragePort(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def load_dataframe(self, path: str, sheet_name: str = None, **kwargs) -> pd.DataFrame:
+    def load_dataframe(
+        self, path: str, sheet_name: str = None, **kwargs
+    ) -> pd.DataFrame:
         """Excel 파일에서 DataFrame을 로드합니다.
 
         Args:
@@ -101,7 +103,7 @@ class StoragePort(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_file(self, path: str) -> Optional[bytes]:
+    def get_file(self, path: str) -> bytes | None:
         """파일의 내용을 바이트 데이터로 읽어옵니다.
 
         Args:
@@ -126,7 +128,7 @@ class StoragePort(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def list_files(self, directory_path: str) -> List[str]:
+    def list_files(self, directory_path: str) -> list[str]:
         """디렉토리 내의 파일 목록을 반환합니다.
 
         Args:
