@@ -92,17 +92,19 @@ class DailyCollectionService:
         current_time = datetime.now().isoformat()
 
         # 2-1. 캐시 사전 일괄 로드 및 만료 제거
-        try:
-            cache_dict = self._cache_port.load_all()
-            cache_dict = {
-                rcp_no: val
-                for rcp_no, val in cache_dict.items()
-                if val.get("expired_at", "") > current_time
-            }
-            logger.info(f"💾 로드된 유효 공시 캐시 개수: {len(cache_dict)}개")
-        except Exception as e:
-            logger.error(f"  ❌ 캐시 로드 중 예외 발생 (비어있는 캐시로 진행): {e}")
-            cache_dict = {}
+        cache_dict = {}
+        if self._cache_port is not None:
+            try:
+                cache_dict = self._cache_port.load_all()
+                cache_dict = {
+                    rcp_no: val
+                    for rcp_no, val in cache_dict.items()
+                    if val.get("expired_at", "") > current_time
+                }
+                logger.info(f"💾 로드된 유효 공시 캐시 개수: {len(cache_dict)}개")
+            except Exception as e:
+                logger.error(f"  ❌ 캐시 로드 중 예외 발생 (비어있는 캐시로 진행): {e}")
+                cache_dict = {}
 
         cache_updated = False
 
@@ -180,7 +182,7 @@ class DailyCollectionService:
                 failed_codes.append(corp_code)
 
         # 6. 캐시 갱신 건이 존재하면 최종 디스크에 단 1회 일괄 기록
-        if cache_updated:
+        if cache_updated and self._cache_port is not None:
             try:
                 self._cache_port.save_all(cache_dict)
                 logger.info(

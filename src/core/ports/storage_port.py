@@ -88,7 +88,7 @@ class StoragePort(ABC):
 
     @abstractmethod
     def load_dataframe(
-        self, path: str, sheet_name: str = None, **kwargs
+        self, path: str, sheet_name: str | None = None, **kwargs
     ) -> pd.DataFrame:
         """Excel 파일에서 DataFrame을 로드합니다.
 

@@ -48,6 +48,18 @@ class AccountItem:
         elif self.cumulative_amount is None:
             self.cumulative_amount = Amount(None)
 
+    @property
+    def amount_value(self) -> Amount:
+        """__post_init__이 보장하는 정규화된 Amount 뷰 (당기금액)."""
+        assert isinstance(self.amount, Amount)
+        return self.amount
+
+    @property
+    def cumulative_value(self) -> Amount:
+        """__post_init__이 보장하는 정규화된 Amount 뷰 (당기누적금액)."""
+        assert isinstance(self.cumulative_amount, Amount)
+        return self.cumulative_amount
+
 
 @dataclass
 class FinancialStatement:
@@ -89,9 +101,9 @@ class FinancialStatement:
                 continue
             if item.account_nm.strip() in ref_keywords:
                 val = (
-                    item.cumulative_amount
-                    if use_cumulative and not item.cumulative_amount.is_none
-                    else item.amount
+                    item.cumulative_value
+                    if use_cumulative and not item.cumulative_value.is_none
+                    else item.amount_value
                 )
                 if not val.is_none:
                     ref_net_income = abs(val)
@@ -120,9 +132,9 @@ class FinancialStatement:
                         continue
                     nm = item.account_nm.strip()
                     val = (
-                        item.cumulative_amount
-                        if use_cumulative and not item.cumulative_amount.is_none
-                        else item.amount
+                        item.cumulative_value
+                        if use_cumulative and not item.cumulative_value.is_none
+                        else item.amount_value
                     )
                     if val.is_none:
                         continue
@@ -144,9 +156,9 @@ class FinancialStatement:
                     continue
                 if item.account_nm.strip() == kw:
                     val = (
-                        item.cumulative_amount
-                        if use_cumulative and not item.cumulative_amount.is_none
-                        else item.amount
+                        item.cumulative_value
+                        if use_cumulative and not item.cumulative_value.is_none
+                        else item.amount_value
                     )
                     if val.is_none:
                         continue
@@ -170,9 +182,9 @@ class FinancialStatement:
                     continue
                 if kw in item.account_nm.strip():
                     val = (
-                        item.cumulative_amount
-                        if use_cumulative and not item.cumulative_amount.is_none
-                        else item.amount
+                        item.cumulative_value
+                        if use_cumulative and not item.cumulative_value.is_none
+                        else item.amount_value
                     )
                     if val.is_none:
                         continue
@@ -248,8 +260,8 @@ class FinancialStatement:
                     factor if multiply else (Decimal(1) / Decimal(str(factor)))
                 )
                 for item in stmt.accounts:
-                    item.amount = item.amount.scale(scale_multiplier)
-                    if not item.cumulative_amount.is_none:
-                        item.cumulative_amount = item.cumulative_amount.scale(
+                    item.amount = item.amount_value.scale(scale_multiplier)
+                    if not item.cumulative_value.is_none:
+                        item.cumulative_amount = item.cumulative_value.scale(
                             scale_multiplier
                         )

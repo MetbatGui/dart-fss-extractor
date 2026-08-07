@@ -400,7 +400,12 @@ class LocalXbrlParserAdapter(XbrlParserPort):
             else:
                 s_date = period.find("xbrli:startDate", namespaces)
                 e_date = period.find("xbrli:endDate", namespaces)
-                if s_date is not None and e_date is not None:
+                if (
+                    s_date is not None
+                    and e_date is not None
+                    and s_date.text is not None
+                    and e_date.text is not None
+                ):
                     contexts[ctx_id] = {
                         "type": "duration",
                         "start_date": s_date.text.strip(),

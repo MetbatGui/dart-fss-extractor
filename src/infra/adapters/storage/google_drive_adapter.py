@@ -183,7 +183,7 @@ class GoogleDriveAdapter(StoragePort):
         try:
             # 메모리에 Excel 파일 생성
             output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:  # ty: ignore[invalid-argument-type]
                 df.to_excel(writer, **kwargs)
             output.seek(0)
 
@@ -345,7 +345,7 @@ class GoogleDriveAdapter(StoragePort):
             return False
 
     def load_dataframe(
-        self, path: str, sheet_name: str = None, **kwargs
+        self, path: str, sheet_name: str | None = None, **kwargs
     ) -> pd.DataFrame:
         """Excel 파일에서 DataFrame을 로드 (다운로드).
 

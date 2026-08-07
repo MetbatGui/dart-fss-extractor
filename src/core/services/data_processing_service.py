@@ -44,13 +44,13 @@ class DataProcessingService:
         return FinancialMetrics(
             revenue=statement.find_account_amount(
                 self.REVENUE_KEYWORDS, use_cumulative
-            ),
+            ).value,
             operating_profit=statement.find_account_amount(
                 self.OP_PROFIT_KEYWORDS, use_cumulative
-            ),
+            ).value,
             net_income=statement.find_account_amount(
                 self.NET_INCOME_KEYWORDS, use_cumulative
-            ),
+            ).value,
         )
 
     def calculate_quarterly_performance(

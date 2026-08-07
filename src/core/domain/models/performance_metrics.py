@@ -144,7 +144,7 @@ class QuarterlyMetrics:
             all_keywords = revenue_kws + op_profit_kws + net_income_kws
             for item in stmt.accounts:
                 if item.account_nm.strip() in all_keywords:
-                    if not item.cumulative_amount.is_none:
+                    if not item.cumulative_value.is_none:
                         return True
             return False
 

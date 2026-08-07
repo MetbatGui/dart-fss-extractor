@@ -248,8 +248,14 @@ class FinancialDataExportService:
                 tree = ET.parse(xml_path)
                 root = tree.getroot()
                 for list_node in root.findall("list"):
-                    corp_code = list_node.find("corp_code").text
-                    corp_name = list_node.find("corp_name").text
+                    corp_code_elem = list_node.find("corp_code")
+                    corp_name_elem = list_node.find("corp_name")
+                    corp_code = (
+                        corp_code_elem.text if corp_code_elem is not None else None
+                    )
+                    corp_name = (
+                        corp_name_elem.text if corp_name_elem is not None else None
+                    )
                     if corp_code and corp_name:
                         mappings[corp_code] = corp_name
             except Exception as e:

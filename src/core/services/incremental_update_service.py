@@ -360,7 +360,7 @@ class IncrementalUpdateService:
         try:
             shutil.copy2(file_path, backup_path)
             logger.info(f"📦 백업 완료: {backup_path}")
-            return backup_path
+            return str(backup_path)
         except Exception as e:
             logger.error(f"백업 실패: {e}")
             return ""

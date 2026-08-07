@@ -2,7 +2,7 @@
 
 import re
 from decimal import Decimal
-from typing import Any, Union
+from typing import Any
 
 
 class Amount:
@@ -13,7 +13,7 @@ class Amount:
     - 하위 호환성을 위해 int, float, str 변환 및 연산자 오버로딩을 제공합니다.
     """
 
-    def __init__(self, value: Union[float, Decimal, str, "Amount", None] = None):
+    def __init__(self, value: Any = None):
         self._value: Decimal | None = self._parse_value(value)
 
     @property
@@ -52,110 +52,121 @@ class Amount:
 
     def scale(self, factor: float | Decimal) -> "Amount":
         """스케일을 조정하여 새로운 Amount 객체를 반환합니다."""
-        if self.is_none:
+        value = self._value
+        if value is None:
             return Amount(None)
-        return Amount(self._value * Decimal(str(factor)))
+        return Amount(value * Decimal(str(factor)))
 
     def __add__(self, other: Any) -> "Amount":
-        other_val = Amount(other)
-        if self.is_none:
-            return other_val
-        if other_val.is_none:
-            return self
-        return Amount(self._value + other_val.value)
+        value = self._value
+        other_value = Amount(other).value
+        if value is None:
+            return Amount(other_value)
+        if other_value is None:
+            return Amount(value)
+        return Amount(value + other_value)
 
     def __sub__(self, other: Any) -> "Amount":
-        other_val = Amount(other)
-        if self.is_none and other_val.is_none:
-            return Amount(None)
-        if self.is_none:
-            return Amount(-other_val.value)
-        if other_val.is_none:
-            return self
-        return Amount(self._value - other_val.value)
+        value = self._value
+        other_value = Amount(other).value
+        if value is None:
+            return Amount(None) if other_value is None else Amount(-other_value)
+        if other_value is None:
+            return Amount(value)
+        return Amount(value - other_value)
 
     def __mul__(self, other: Any) -> "Amount":
-        if self.is_none:
+        value = self._value
+        if value is None:
             return Amount(None)
         if isinstance(other, Amount):
-            if other.is_none:
+            if other.value is None:
                 return Amount(None)
-            return Amount(self._value * other.value)
+            return Amount(value * other.value)
         try:
-            return Amount(self._value * Decimal(str(other)))
+            return Amount(value * Decimal(str(other)))
         except Exception:
             return Amount(None)
 
     def __truediv__(self, other: Any) -> "Amount":
-        if self.is_none:
+        value = self._value
+        if value is None:
             return Amount(None)
         if isinstance(other, Amount):
-            if other.is_none or other.value == 0:
+            if other.value is None or other.value == 0:
                 return Amount(None)
-            return Amount(self._value / other.value)
+            return Amount(value / other.value)
         try:
             divisor = Decimal(str(other))
             if divisor == 0:
                 return Amount(None)
-            return Amount(self._value / divisor)
+            return Amount(value / divisor)
         except Exception:
             return Amount(None)
 
     def __eq__(self, other: object) -> bool:
-        other_val = Amount(other)
-        return self._value == other_val.value
+        return self._value == Amount(other).value
 
     def __lt__(self, other: Any) -> bool:
-        other_val = Amount(other)
-        if self.is_none or other_val.is_none:
+        value = self._value
+        other_value = Amount(other).value
+        if value is None or other_value is None:
             return False
-        return self._value < other_val.value
+        return value < other_value
 
     def __le__(self, other: Any) -> bool:
-        other_val = Amount(other)
-        if self.is_none or other_val.is_none:
+        value = self._value
+        other_value = Amount(other).value
+        if value is None or other_value is None:
             return False
-        return self._value <= other_val.value
+        return value <= other_value
 
     def __gt__(self, other: Any) -> bool:
-        other_val = Amount(other)
-        if self.is_none or other_val.is_none:
+        value = self._value
+        other_value = Amount(other).value
+        if value is None or other_value is None:
             return False
-        return self._value > other_val.value
+        return value > other_value
 
     def __ge__(self, other: Any) -> bool:
-        other_val = Amount(other)
-        if self.is_none or other_val.is_none:
+        value = self._value
+        other_value = Amount(other).value
+        if value is None or other_value is None:
             return False
-        return self._value >= other_val.value
+        return value >= other_value
 
     def __neg__(self) -> "Amount":
-        if self.is_none:
+        value = self._value
+        if value is None:
             return Amount(None)
-        return Amount(-self._value)
+        return Amount(-value)
 
     def __abs__(self) -> "Amount":
-        if self.is_none:
+        value = self._value
+        if value is None:
             return Amount(None)
-        return Amount(abs(self._value))
+        return Amount(abs(value))
 
     def __int__(self) -> int:
-        if self.is_none:
+        value = self._value
+        if value is None:
             raise ValueError("결측치(None)는 int로 변환할 수 없습니다.")
-        return int(self._value)
+        return int(value)
 
     def __float__(self) -> float:
-        if self.is_none:
+        value = self._value
+        if value is None:
             raise ValueError("결측치(None)는 float로 변환할 수 없습니다.")
-        return float(self._value)
+        return float(value)
 
     def __str__(self) -> str:
-        if self.is_none:
+        value = self._value
+        if value is None:
             return ""
         # 소수점 이하가 없으면 정수 문자열로, 있으면 실수 문자열로 반환
-        if self._value == self._value.to_integral_value():
-            return str(int(self._value))
-        return str(self._value)
+        if value == value.to_integral_value():
+            return str(int(value))
+        return str(value)
 
     def __repr__(self) -> str:
         return f"Amount({self!s})"

@@ -44,9 +44,10 @@ class DartFinancialAdapter(FinancialStatementPort, ApiFinancialCollectorPort):
             use_cache: 캐시 사용 여부
             cache_dir: 캐시 저장 경로 (None이면 OUTPUT_DIRECTORY 환경변수 기반 기본 경로 사용)
         """
-        self._api_key = api_key or os.getenv("DART_API_KEY")
-        if not self._api_key:
+        resolved_api_key = api_key or os.getenv("DART_API_KEY")
+        if not resolved_api_key:
             raise OSError("DART_API_KEY가 설정되지 않았습니다.")
+        self._api_key: str = resolved_api_key
         self._use_cache = use_cache
         if cache_dir:
             self._cache_dir = Path(cache_dir).resolve()
@@ -265,8 +266,8 @@ class DartFinancialAdapter(FinancialStatementPort, ApiFinancialCollectorPort):
         year: int,
         report_type: ReportType,
         fs_type: FinancialStatementType,
-    ) -> FinancialStatement | None:
-        """캐시에서 로드."""
+    ) -> FinancialStatement | str | None:
+        """캐시에서 로드. "데이터 없음"으로 확인된 캐시는 _NO_DATA_MARKER 문자열을 반환한다."""
         if not self._use_cache:
             return None
 
