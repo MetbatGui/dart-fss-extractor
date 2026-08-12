@@ -91,13 +91,16 @@ class FinancialStatement:
         ref_keywords = [
             "당기순이익",
             "당기순이익(손실)",
+            "당기순손실",
             "분기순이익",
             "분기순이익(손실)",
+            "분기순손실",
             "반기순이익",
             "반기순이익(손실)",
+            "반기순손실",
         ]
         for item in self.accounts:
-            if item.statement_type and item.statement_type.strip().upper() == "BS":
+            if item.statement_type and item.statement_type.strip().upper() in ("BS", "CF"):
                 continue
             if item.account_nm.strip() in ref_keywords:
                 val = (
@@ -117,7 +120,7 @@ class FinancialStatement:
             has_integrated = any(
                 item.account_nm.strip() in ["매출액", "영업수익", "매출"]
                 and not (
-                    item.statement_type and item.statement_type.strip().upper() == "BS"
+                    item.statement_type and item.statement_type.strip().upper() in ("BS", "CF")
                 )
                 for item in self.accounts
             )
@@ -127,7 +130,7 @@ class FinancialStatement:
                 for item in self.accounts:
                     if (
                         item.statement_type
-                        and item.statement_type.strip().upper() == "BS"
+                        and item.statement_type.strip().upper() in ("BS", "CF")
                     ):
                         continue
                     nm = item.account_nm.strip()
@@ -152,7 +155,7 @@ class FinancialStatement:
         # 1. 완전 일치 우선순위 검색
         for kw in keywords:
             for item in self.accounts:
-                if item.statement_type and item.statement_type.strip().upper() == "BS":
+                if item.statement_type and item.statement_type.strip().upper() in ("BS", "CF"):
                     continue
                 if item.account_nm.strip() == kw:
                     val = (
@@ -178,9 +181,14 @@ class FinancialStatement:
         # 2. 부분 일치 우선순위 검색
         for kw in keywords:
             for item in self.accounts:
-                if item.statement_type and item.statement_type.strip().upper() == "BS":
+                if item.statement_type and item.statement_type.strip().upper() in ("BS", "CF"):
                     continue
-                if kw in item.account_nm.strip():
+                nm_stripped = item.account_nm.strip()
+                # "기본주당계속영업당기순이익"처럼 EPS(주당) 계정이 "당기순이익"을
+                # 부분 문자열로 포함해 총액 대신 주당 금액이 오매칭되는 것을 방지
+                if "주당" in nm_stripped:
+                    continue
+                if kw in nm_stripped:
                     val = (
                         item.cumulative_value
                         if use_cumulative and not item.cumulative_value.is_none
@@ -198,6 +206,42 @@ class FinancialStatement:
                             and abs(val) > ref_net_income * 1.1
                         ):
                             continue
+                    return val
+
+        # 3. 당기순이익 최후 폴백: "분기연결순이익"처럼 접두어가 붙어 부분일치도
+        # 실패하는 변형을 넓게 잡기 위해 "순이익"/"순손실"로 끝나는 계정을 탐색한다.
+        is_net_income_search = any("순이익" in kw for kw in keywords)
+        if is_net_income_search:
+            for item in self.accounts:
+                # SCE(자본변동표)에는 "현금흐름위험회피순손익" 같은 기타포괄손익
+                # 세부항목도 "순손익"으로 끝나 오매칭될 수 있어 함께 제외한다.
+                if item.statement_type and item.statement_type.strip().upper() in (
+                    "BS",
+                    "CF",
+                    "SCE",
+                ):
+                    continue
+                nm = item.account_nm.strip()
+                # "법인세비용차감전순이익"(세전이익)은 순이익이 아니므로 폴백에서 제외
+                if "법인세" in nm:
+                    continue
+                # 진짜 순이익 계정은 항상 "당기/분기/반기"로 시작한다.
+                # "현금흐름위험회피순손익"처럼 접미사만 같은 기타포괄손익
+                # 세부항목(헤지/환산/재측정 등)을 배제하기 위한 접두어 가드.
+                if not nm.startswith(("당기", "분기", "반기")):
+                    continue
+                if (
+                    nm.endswith("순이익")
+                    or nm.endswith("순손실")
+                    or nm.endswith("순손익")
+                ):
+                    val = (
+                        item.cumulative_value
+                        if use_cumulative and not item.cumulative_value.is_none
+                        else item.amount_value
+                    )
+                    if val.is_none:
+                        continue
                     return val
 
         return Amount(None)

@@ -24,15 +24,32 @@ class DataProcessingService:
             self.OP_PROFIT_KEYWORDS = keywords_config.get("operating_profit", [])
             self.NET_INCOME_KEYWORDS = keywords_config.get("net_income", [])
         else:
-            self.REVENUE_KEYWORDS = ["매출액", "수익(매출액)", "영업수익", "매출"]
-            self.OP_PROFIT_KEYWORDS = ["영업이익", "영업이익(손실)"]
+            self.REVENUE_KEYWORDS = [
+                "보험영업수익",
+                "보험서비스수익",
+                "매출액",
+                "수익(매출액)",
+                "영업수익",
+                "매출",
+            ]
+            self.OP_PROFIT_KEYWORDS = [
+                "영업이익",
+                "영업이익(손실)",
+                "영업손실",
+                "영업손익",
+                "영업순손익",
+                "영업활동으로부터의 이익(손실)",
+            ]
             self.NET_INCOME_KEYWORDS = [
                 "당기순이익",
                 "당기순이익(손실)",
+                "당기순손실",
                 "분기순이익",
                 "분기순이익(손실)",
+                "분기순손실",
                 "반기순이익",
                 "반기순이익(손실)",
+                "반기순손실",
             ]
 
     def extract_metrics(

@@ -34,12 +34,14 @@ class FinancialCollectionService:
         repository_port: RepositoryPort,
         export_port: ExportPort,
         processing_service: DataProcessingService,
+        request_delay: float = 0.1,
     ):
         self._corp_code_port = corp_code_port
         self._financial_port = financial_port
         self._repository_port = repository_port
         self._export_port = export_port
         self._processing_service = processing_service
+        self._request_delay = request_delay
 
     def collect_and_save(
         self,
@@ -96,16 +98,44 @@ class FinancialCollectionService:
 
             # 2-1. 저장소 데이터와 메타데이터 동기화 (Sync)
             # 메타데이터에는 없지만 실제 파티션 파일에는 데이터가 있을 수 있음
+            # (단, 값이 전부 비어있는 연도는 성공으로 간주하지 않음 - 재시도 대상 유지)
             if self._repository_port.exists(dataset_name, code):
                 existing_df = self._repository_port.load_partition(dataset_name, code)
                 if not existing_df.empty and "연도" in existing_df.columns:
-                    repo_years = existing_df["연도"].unique().tolist()
-                    for y in repo_years:
+                    value_cols = [
+                        c
+                        for c in ["매출액", "영업이익", "당기순이익"]
+                        if c in existing_df.columns
+                    ]
+                    has_value_mask = (
+                        existing_df[value_cols].notna().any(axis=1)
+                        if value_cols
+                        else pd.Series(False, index=existing_df.index)
+                    )
+                    valid_years = {
+                        int(y) for y in existing_df.loc[has_value_mask, "연도"].unique()
+                    }
+                    all_stored_years = {
+                        int(y) for y in existing_df["연도"].unique()
+                    }
+                    for y in valid_years:
                         if y not in company.success_years:
-                            company.mark_success(int(y))
+                            company.mark_success(y)
                             logger.info(
-                                f"[{name}] 저장소에서 {y}년 데이터 발견 -> 메타데이터 동기화."
+                                f"[{name}] 저장소에서 {y}년 유효 데이터 발견 -> 메타데이터 동기화."
                             )
+                    # 성공으로 기록되어 있지만 실제 저장된 값이 전부 비어있는 연도는
+                    # success_years에서 제거하여 재시도 대상으로 되돌림
+                    stale_success_years = [
+                        y
+                        for y in company.success_years
+                        if y in all_stored_years and y not in valid_years
+                    ]
+                    for y in stale_success_years:
+                        company.success_years.remove(y)
+                        logger.info(
+                            f"[{name}] {y}년은 성공 기록됐지만 저장된 값이 비어있어 재시도 대상으로 되돌립니다."
+                        )
 
             # 2-2. 스마트 건너뛰기: 요청한 모든 연도가 이미 '성공'했거나 '실패(스킵시)'했는지 확인
             target_years = set(range(start_year, end_year + 1))
@@ -147,22 +177,22 @@ class FinancialCollectionService:
 
                 try:
                     # 각 보고서 조회
-                    time.sleep(0.1)
+                    time.sleep(self._request_delay)
                     q1 = self._financial_port.get_financial_statement(
                         code, year, ReportType.Q1
                     )
 
-                    time.sleep(0.1)
+                    time.sleep(self._request_delay)
                     semi = self._financial_port.get_financial_statement(
                         code, year, ReportType.SEMI_ANNUAL
                     )
 
-                    time.sleep(0.1)
+                    time.sleep(self._request_delay)
                     q3 = self._financial_port.get_financial_statement(
                         code, year, ReportType.Q3
                     )
 
-                    time.sleep(0.1)
+                    time.sleep(self._request_delay)
                     annual = self._financial_port.get_financial_statement(
                         code, year, ReportType.ANNUAL
                     )
@@ -173,12 +203,17 @@ class FinancialCollectionService:
                     )
 
                     # 데이터 리스트에 추가
-                    self._append_to_list(
+                    has_valid_data = self._append_to_list(
                         company_data, name, year, metrics, company.settlement_month
                     )
 
-                    # 성공 기록
-                    company.mark_success(year)
+                    if has_valid_data:
+                        company.mark_success(year)
+                    else:
+                        logger.warning(
+                            f"[{name}] {year}년 유효한 실적값을 하나도 찾지 못해 실패로 기록합니다 (재시도 대상)."
+                        )
+                        company.mark_failure(year)
 
                 except Exception as e:
                     logger.error(f"{name} {year}년 데이터 수집 중 오류 발생: {e}")
@@ -303,13 +338,20 @@ class FinancialCollectionService:
         year: int,
         metrics: QuarterlyMetrics,
         settlement_month: int = 12,
-    ) -> None:
-        """계산된 지표를 리스트에 추가 (Long Format)하며 결산월 기준 캘린더 분기로 보정합니다."""
+    ) -> bool:
+        """계산된 지표를 리스트에 추가 (Long Format)하며 결산월 기준 캘린더 분기로 보정합니다.
+
+        Returns:
+            실제 값(매출액/영업이익/당기순이익 중 하나 이상)이 존재하는 데이터가 있었으면 True.
+        """
+        has_valid_data = False
 
         # 1. 분기 데이터 추가
         for q in ["1Q", "2Q", "3Q", "4Q"]:
             m = metrics.metrics_by_quarter.get(q)
             if m:
+                if m.is_valid:
+                    has_valid_data = True
                 # 캘린더 분기 보정 (Company.to_calendar_period에 위임하여 로직 중복/불일치 방지)
                 try:
                     calendar_year, calendar_quarter = Company(
@@ -325,6 +367,7 @@ class FinancialCollectionService:
                         "연도": calendar_year,
                         "구분": "분기",
                         "분기": calendar_quarter,
+                        "구분_상세": "연결",
                         "매출액": m.revenue,
                         "영업이익": m.operating_profit,
                         "당기순이익": m.net_income,
@@ -334,7 +377,7 @@ class FinancialCollectionService:
         # 2. 연간 데이터 추가
         # QuarterlyMetrics.annual_metrics가 있으면 이를 사용하고, 없으면 분기 합산으로 처리.
 
-        if metrics.annual_metrics and metrics.annual_metrics.revenue is not None:
+        if metrics.annual_metrics and metrics.annual_metrics.is_valid:
             # 원본 연간 데이터 사용
             data_list.append(
                 {
@@ -342,11 +385,13 @@ class FinancialCollectionService:
                     "연도": year,
                     "구분": "연간",
                     "분기": "연간",
+                    "구분_상세": "연결",
                     "매출액": metrics.annual_metrics.revenue,
                     "영업이익": metrics.annual_metrics.operating_profit,
                     "당기순이익": metrics.annual_metrics.net_income,
                 }
             )
+            has_valid_data = True
         else:
             # 백업: 1~4Q 합산으로 처리
             annual = self._processing_service.calculate_annual_from_quarters(
@@ -363,8 +408,12 @@ class FinancialCollectionService:
                         "연도": year,
                         "구분": "연간",
                         "분기": "연간",  # Pivot시 사용 안함
+                        "구분_상세": "연결",
                         "매출액": annual.revenue,
                         "영업이익": annual.operating_profit,
                         "당기순이익": annual.net_income,
                     }
                 )
+                has_valid_data = True
+
+        return has_valid_data

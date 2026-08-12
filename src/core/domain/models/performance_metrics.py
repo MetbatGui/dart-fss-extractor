@@ -216,6 +216,10 @@ class QuarterlyMetrics:
         q3_cum = extract(q3_stmt, "3Q", use_cumulative=True)
 
         ann_cum = extract(annual_stmt, "Annual", use_cumulative=True)
+        if not ann_cum.is_valid:
+            ann_single = extract(annual_stmt, "Annual", use_cumulative=False)
+            if ann_single.is_valid:
+                ann_cum = ann_single
 
         # 누적치 결정 로직 캡슐화
         def resolve_cumulative(
@@ -297,11 +301,7 @@ class QuarterlyMetrics:
             )
 
         q4_final_single = FinancialMetrics()
-        if (
-            annual_stmt is not None
-            and ann_cum.revenue is not None
-            and q3_final_cum.revenue is not None
-        ):
+        if annual_stmt is not None and ann_cum.is_valid and q3_final_cum.is_valid:
             # 3Q 누적치를 실제로 채운 원본 보고서(q3 > 반기 > 1분기 순 폴백)와 연간보고서의 회계기수 일치 검증
             q3_cum_source_stmt = q3_stmt or semi_stmt or q1_stmt
             if _same_fiscal_period(annual_stmt, q3_cum_source_stmt):

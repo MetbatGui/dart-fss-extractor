@@ -16,7 +16,11 @@ from infra.adapters.corp_code_adapter import CorpCodeAdapter
 from infra.adapters.dart_financial_adapter import DartFinancialAdapter
 from infra.adapters.dart_xbrl_financial_adapter import DartXbrlFinancialAdapter
 from infra.adapters.excel_export_adapter import ExcelExportAdapter
+from infra.adapters.naver_ticker_name_adapter import NaverTickerNameAdapter
 from infra.adapters.sqlite.sqlite_repository_adapter import SqliteRepositoryAdapter
+from infra.adapters.sqlite.sqlite_ticker_name_cache_adapter import (
+    SqliteTickerNameCacheAdapter,
+)
 
 # 로깅 설정
 logging.basicConfig(
@@ -126,6 +130,8 @@ def main():
         repository_port=repository_adapter,
         processing_service=processing_service,
         xbrl_collector_port=xbrl_financial_adapter,
+        ticker_name_port=NaverTickerNameAdapter(),
+        ticker_cache_port=SqliteTickerNameCacheAdapter(),
     )
 
     # 1. 당일 공시 스캔 및 증분 적재 수행 (SQLite 트랜잭션 수호)

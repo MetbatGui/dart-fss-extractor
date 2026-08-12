@@ -30,8 +30,17 @@ CREATE TABLE IF NOT EXISTS financials (
 """
 
 CREATE_FINANCIALS_UNIQUE_INDEX = """
-CREATE UNIQUE INDEX IF NOT EXISTS uidx_financials 
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_financials
 ON financials (corp_code, year, division, quarter, detail_type);
+"""
+
+CREATE_TICKER_NAMES_TABLE = """
+CREATE TABLE IF NOT EXISTS ticker_names (
+    corp_code TEXT PRIMARY KEY,
+    ticker TEXT NOT NULL,      -- KRX 종목코드
+    name TEXT NOT NULL,        -- 네이버 기준 현재 종목명
+    updated_at TEXT
+);
 """
 
 
@@ -41,3 +50,4 @@ def initialize_db(conn) -> None:
         conn.execute(CREATE_COMPANIES_TABLE)
         conn.execute(CREATE_FINANCIALS_TABLE)
         conn.execute(CREATE_FINANCIALS_UNIQUE_INDEX)
+        conn.execute(CREATE_TICKER_NAMES_TABLE)

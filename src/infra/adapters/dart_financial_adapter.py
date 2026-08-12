@@ -36,6 +36,7 @@ class DartFinancialAdapter(FinancialStatementPort, ApiFinancialCollectorPort):
         api_key: str | None = None,
         use_cache: bool = True,
         cache_dir: str | None = None,
+        cache_only: bool = False,
     ):
         """초기화.
 
@@ -43,12 +44,14 @@ class DartFinancialAdapter(FinancialStatementPort, ApiFinancialCollectorPort):
             api_key: DART API 키 (None이면 환경변수에서 읽음)
             use_cache: 캐시 사용 여부
             cache_dir: 캐시 저장 경로 (None이면 OUTPUT_DIRECTORY 환경변수 기반 기본 경로 사용)
+            cache_only: True면 캐시에 없는 데이터는 API 호출 없이 건너뜀 (네트워크 요청 전무)
         """
         resolved_api_key = api_key or os.getenv("DART_API_KEY")
-        if not resolved_api_key:
+        if not resolved_api_key and not cache_only:
             raise OSError("DART_API_KEY가 설정되지 않았습니다.")
-        self._api_key: str = resolved_api_key
+        self._api_key: str = resolved_api_key or ""
         self._use_cache = use_cache
+        self._cache_only = cache_only
         if cache_dir:
             self._cache_dir = Path(cache_dir).resolve()
         else:
@@ -100,7 +103,10 @@ class DartFinancialAdapter(FinancialStatementPort, ApiFinancialCollectorPort):
             else:
                 missing_types.append(fs_type)
 
-        # 2. 누락된 유형이 있으면 각각 API 호출
+        # 2. 누락된 유형이 있으면 각각 API 호출 (cache_only 모드에서는 건너뜀)
+        if self._cache_only:
+            return results
+
         for fs_type in missing_types:
             params = self._build_api_params(corp_code, year, report_type, fs_type)
 

@@ -140,6 +140,125 @@ def test_collect_failure_tracking(
     assert 2023 not in saved_company.success_years
 
 
+def test_metadata_sync_ignores_years_with_no_valid_values(
+    service,
+    mock_corp_code_port,
+    mock_financial_port,
+    mock_processing_service,
+    mock_repository_port,
+    mock_export_port
+):
+    """저장소에 이미 존재하는 파티션 데이터를 메타데이터와 동기화(2-1단계)할 때,
+    해당 연도의 모든 행이 값 없이(None) 비어있으면 success_years로 취급하면 안 된다.
+    (과거 버그로 빈 행만 저장된 연도가 메타데이터 동기화 시점에 다시 success로
+    재오염되어 영구히 재시도 대상에서 빠지는 것을 방지)
+    """
+    company_names = ["SyncCorp"]
+    mock_corp_code_port.get_codes.return_value = ["33333333"]
+    mock_repository_port.load_company_metadata.return_value = None
+    mock_financial_port.get_settlement_month.return_value = 12
+    mock_repository_port.exists.return_value = True
+
+    # 2020년은 전부 빈 값(과거 버그로 오염), 2021년은 실제 값 보유
+    existing_df = pd.DataFrame([
+        {"기업명": "SyncCorp", "연도": 2020, "구분": "분기", "분기": "1Q", "구분_상세": "연결",
+         "매출액": None, "영업이익": None, "당기순이익": None, "rcept_no": None},
+        {"기업명": "SyncCorp", "연도": 2021, "구분": "분기", "분기": "1Q", "구분_상세": "연결",
+         "매출액": 1000, "영업이익": 100, "당기순이익": 50, "rcept_no": None},
+    ])
+    mock_repository_port.load_partition.return_value = existing_df
+    mock_repository_port.load_all.return_value = pd.DataFrame()
+
+    mock_financial_port.get_financial_statement.return_value = Mock(spec=FinancialStatement)
+    mock_processing_service.calculate_quarterly_performance.return_value = QuarterlyMetrics(
+        corp_name="SyncCorp"
+    )
+    mock_processing_service.calculate_annual_from_quarters.return_value = FinancialMetrics()
+
+    # 요청 범위를 2020~2021로 좁혀서 실제 재수집 루프가 이 두 해만 스캔하도록 함
+    service.collect_and_save(company_names, 2020, 2021, "test.xlsx", skip_failed=False)
+
+    saved_company = mock_repository_port.save_company_metadata.call_args[0][0]
+    assert 2020 not in saved_company.success_years
+    assert 2021 in saved_company.success_years
+
+
+def test_collect_and_save_marks_failure_when_all_metrics_are_empty(
+    service,
+    mock_corp_code_port,
+    mock_financial_port,
+    mock_processing_service,
+    mock_repository_port,
+    mock_export_port
+):
+    """계정과목 키워드가 전혀 매칭되지 않아 추출된 지표가 전부 None이면,
+    success_years가 아닌 failed_years로 기록되어 다음 수집 때 재시도 대상이 되어야 한다.
+    (실제 프로덕션에서 우리금융지주 등 60여개 기업이 빈 값으로 success 처리되어
+    영구히 재시도되지 않고 방치된 버그의 재현 테스트)
+    """
+    company_names = ["EmptyCorp"]
+    mock_corp_code_port.get_codes.return_value = ["11111111"]
+    mock_repository_port.exists.return_value = False
+    mock_repository_port.load_company_metadata.return_value = None
+    mock_financial_port.get_settlement_month.return_value = 12
+    mock_repository_port.load_all.return_value = pd.DataFrame()
+
+    mock_financial_port.get_financial_statement.return_value = Mock(spec=FinancialStatement)
+
+    empty_metrics = QuarterlyMetrics(corp_name="EmptyCorp")
+    empty_metrics.metrics_by_quarter = {
+        "1Q": FinancialMetrics(), "2Q": FinancialMetrics(),
+        "3Q": FinancialMetrics(), "4Q": FinancialMetrics(),
+    }
+    mock_processing_service.calculate_quarterly_performance.return_value = empty_metrics
+    mock_processing_service.calculate_annual_from_quarters.return_value = FinancialMetrics()
+
+    service.collect_and_save(company_names, 2023, 2023, "test.xlsx")
+
+    saved_company = mock_repository_port.save_company_metadata.call_args[0][0]
+    assert 2023 not in saved_company.success_years
+    assert 2023 in saved_company.failed_years
+
+
+def test_append_to_list_sets_detail_type_for_merge_compatibility(
+    service,
+    mock_corp_code_port,
+    mock_financial_port,
+    mock_processing_service,
+    mock_repository_port,
+    mock_export_port
+):
+    """새로 수집된 행에 '구분_상세'가 없으면, 기존 파티션(구분_상세 컬럼 보유)과
+    concat 병합 시 신규 행의 값이 NaN이 되어 SQLite NOT NULL(detail_type) 제약 위반으로
+    저장 자체가 실패하는 버그의 재현/회귀 테스트. 모든 신규 행에 '구분_상세'가 채워져야 한다.
+    """
+    company_names = ["MergeCorp"]
+    mock_corp_code_port.get_codes.return_value = ["22222222"]
+    mock_repository_port.load_company_metadata.return_value = None
+    mock_financial_port.get_settlement_month.return_value = 12
+
+    # 기존 파티션이 이미 존재하며 '구분_상세' 컬럼을 보유한 상황 (실제 load_partition 결과와 동일한 형태)
+    mock_repository_port.exists.return_value = True
+    existing_df = pd.DataFrame([{
+        "기업명": "MergeCorp", "연도": 2022, "구분": "분기", "분기": "1Q", "구분_상세": "연결",
+        "매출액": 500, "영업이익": 50, "당기순이익": 25, "rcept_no": None,
+    }])
+    mock_repository_port.load_partition.return_value = existing_df
+    mock_repository_port.load_all.return_value = pd.DataFrame()
+
+    mock_financial_port.get_financial_statement.return_value = Mock(spec=FinancialStatement)
+
+    metrics = QuarterlyMetrics(corp_name="MergeCorp")
+    metrics.metrics_by_quarter = {"1Q": FinancialMetrics(revenue=Decimal("1000"))}
+    mock_processing_service.calculate_quarterly_performance.return_value = metrics
+
+    service.collect_and_save(company_names, 2023, 2023, "test.xlsx")
+
+    saved_df = mock_repository_port.save_partition.call_args[0][2]
+    assert "구분_상세" in saved_df.columns
+    assert saved_df["구분_상세"].isna().sum() == 0
+
+
 def test_retry_on_failure_history(
     service,
     mock_corp_code_port,

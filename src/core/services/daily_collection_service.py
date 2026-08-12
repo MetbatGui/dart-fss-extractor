@@ -14,6 +14,7 @@ from core.ports.corp_code_port import CorpCodePort
 from core.ports.download_port import DownloadPort
 from core.ports.financial_statement_port import FinancialStatementPort
 from core.ports.repository_port import RepositoryPort
+from core.ports.ticker_name_port import TickerNamePort
 from core.ports.xbrl_financial_collector_port import XbrlFinancialCollectorPort
 from core.ports.xbrl_parser_port import XbrlParserPort
 from core.services.data_processing_service import DataProcessingService
@@ -42,6 +43,8 @@ class DailyCollectionService:
         xbrl_parser_port: XbrlParserPort | None = None,
         processing_service: DataProcessingService | None = None,
         xbrl_collector_port: XbrlFinancialCollectorPort | None = None,
+        ticker_name_port: TickerNamePort | None = None,
+        ticker_cache_port: CachePort | None = None,
     ):
         self._corp_code_port = corp_code_port
         self._financial_port = financial_port
@@ -50,6 +53,10 @@ class DailyCollectionService:
         self._download_port = download_port
         self._xbrl_parser_port = xbrl_parser_port
         self._processing_service = processing_service or DataProcessingService()
+        self._ticker_name_port = ticker_name_port
+        self._ticker_cache_port = ticker_cache_port
+        self._ticker_name_cache: dict[str, dict] = {}
+        self._ticker_cache_dirty = False
         self._xbrl_collector_port = xbrl_collector_port
 
     def collect_daily_disclosures(
@@ -90,6 +97,11 @@ class DailyCollectionService:
         failed_codes = []
 
         current_time = datetime.now().isoformat()
+
+        # 2-0. 티커별 종목명 캐시 로드 ({corp_code: {"ticker":.., "name":.., "updated_at":..}})
+        if self._ticker_cache_port is not None:
+            self._ticker_name_cache = self._ticker_cache_port.load_all()
+        self._ticker_cache_dirty = False
 
         # 2-1. 캐시 사전 일괄 로드 및 만료 제거
         cache_dict = {}
@@ -135,6 +147,11 @@ class DailyCollectionService:
             # 기업 정보 조회해서 결산월 얻어오기
             company = self._get_or_create_company(corp_code, corp_name)
             settlement_month = company.settlement_month
+
+            # 3-2. 공시에 실린 종목코드(ticker) 기준 최신 종목명 캐시 동기화 (충돌 감지)
+            stock_code = (disc.get("stock_code") or "").strip()
+            if self._ticker_name_port and stock_code:
+                self._sync_ticker_name(corp_code, stock_code)
 
             # 4. 공시 시기(연도, 분기) 및 정정 여부 동적 분석
             period_info = self.parse_report_period(report_nm, settlement_month, rm)
@@ -191,10 +208,40 @@ class DailyCollectionService:
             except Exception as e:
                 logger.error(f"  ❌ 수집 캐시 파일 일괄 영속화 실패: {e}")
 
+        # 티커별 종목명 캐시 갱신 건이 존재하면 최종 디스크에 일괄 기록
+        if self._ticker_cache_dirty and self._ticker_cache_port is not None:
+            try:
+                self._ticker_cache_port.save_all(self._ticker_name_cache)
+                logger.info("💾 갱신된 티커별 종목명 캐시를 디스크에 일괄 영속화 완료했습니다.")
+            except Exception as e:
+                logger.error(f"  ❌ 티커별 종목명 캐시 영속화 실패: {e}")
+
         logger.info(
             f"🏁 데일리 공시 수집 종료. 성공: {len(success_codes)}건, 실패: {len(failed_codes)}건"
         )
         return {"success": success_codes, "failed": failed_codes}
+
+    def _sync_ticker_name(self, corp_code: str, stock_code: str) -> None:
+        """공시에 실린 종목코드로 네이버에서 현재 종목명을 조회해, 캐시와 다르면 충돌로 감지하고 갱신한다."""
+        fresh_name = self._ticker_name_port.get_name_by_ticker(stock_code)
+        if not fresh_name:
+            return
+
+        entry = self._ticker_name_cache.get(corp_code)
+        if entry and entry.get("ticker") == stock_code and entry.get("name") == fresh_name:
+            return  # 변경 없음
+
+        if entry:
+            logger.info(
+                f"🔔 [{corp_code}] 종목명 변경 감지: '{entry.get('name')}' -> '{fresh_name}' (ticker={stock_code})"
+            )
+
+        self._ticker_name_cache[corp_code] = {
+            "ticker": stock_code,
+            "name": fresh_name,
+            "updated_at": datetime.now().isoformat(),
+        }
+        self._ticker_cache_dirty = True
 
     def parse_report_period(
         self, report_nm: str, settlement_month: int = 12, rm: str = ""

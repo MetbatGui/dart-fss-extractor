@@ -196,3 +196,50 @@ def test_collect_daily_disclosures_with_local_xbrl_path(service, mock_ports):
         parser_port.parse_xbrl_zip.assert_called()
         # 데이터베이스 적재 검증
         repo_port.save_partition.assert_called()
+
+
+def test_sync_ticker_name_caches_new_ticker(service):
+    """처음 보는 corp_code는 조용히 캐시에 저장되고 dirty 플래그가 켜진다."""
+    service._ticker_name_port = MagicMock()
+    service._ticker_name_port.get_name_by_ticker.return_value = "LIG디펜스앤에어로스페이스"
+    service._ticker_name_cache = {}
+
+    service._sync_ticker_name("00503668", "079550")
+
+    assert service._ticker_name_cache["00503668"]["name"] == "LIG디펜스앤에어로스페이스"
+    assert service._ticker_name_cache["00503668"]["ticker"] == "079550"
+    assert service._ticker_cache_dirty is True
+
+
+def test_sync_ticker_name_detects_name_change(service, caplog):
+    """캐시된 이름과 네이버가 돌려준 최신 이름이 다르면 충돌로 감지하고 갱신한다."""
+    service._ticker_name_port = MagicMock()
+    service._ticker_name_port.get_name_by_ticker.return_value = "LIG디펜스앤에어로스페이스"
+    service._ticker_name_cache = {
+        "00503668": {"ticker": "079550", "name": "LIG넥스원", "updated_at": "x"}
+    }
+
+    with caplog.at_level("INFO"):
+        service._sync_ticker_name("00503668", "079550")
+
+    assert service._ticker_name_cache["00503668"]["name"] == "LIG디펜스앤에어로스페이스"
+    assert service._ticker_cache_dirty is True
+    assert "종목명 변경 감지" in caplog.text
+
+
+def test_sync_ticker_name_no_change_stays_clean(service):
+    """이름이 그대로면 캐시를 건드리지 않고 dirty 플래그도 켜지지 않는다."""
+    service._ticker_name_port = MagicMock()
+    service._ticker_name_port.get_name_by_ticker.return_value = "LIG디펜스앤에어로스페이스"
+    service._ticker_name_cache = {
+        "00503668": {
+            "ticker": "079550",
+            "name": "LIG디펜스앤에어로스페이스",
+            "updated_at": "x",
+        }
+    }
+    service._ticker_cache_dirty = False
+
+    service._sync_ticker_name("00503668", "079550")
+
+    assert service._ticker_cache_dirty is False
