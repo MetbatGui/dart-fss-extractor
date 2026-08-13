@@ -34,6 +34,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS uidx_financials
 ON financials (corp_code, year, division, quarter, detail_type);
 """
 
+# financials는 기간별 "최신값 1건"만 유지(덮어쓰기)하므로, 정정공시로 값이 바뀌기 전
+# 이전 공시(A)의 값이 사라진다. 정정 이력을 보존하기 위한 append-only 로그 테이블.
+CREATE_FINANCIALS_HISTORY_TABLE = """
+CREATE TABLE IF NOT EXISTS financials_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    corp_code TEXT NOT NULL,
+    corp_name TEXT NOT NULL,
+    year INTEGER NOT NULL,
+    division TEXT NOT NULL,
+    quarter TEXT NOT NULL,
+    detail_type TEXT NOT NULL,
+    revenue REAL,
+    operating_profit REAL,
+    net_income REAL,
+    rcept_no TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+# 같은 공시(rcept_no)를 재수집(cache_only 재처리 등)해도 값이 동일하면 중복 기록하지 않기 위한 dedup 인덱스.
+CREATE_FINANCIALS_HISTORY_UNIQUE_INDEX = """
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_financials_history
+ON financials_history (corp_code, year, division, quarter, detail_type, rcept_no, revenue, operating_profit, net_income);
+"""
+
 CREATE_TICKER_NAMES_TABLE = """
 CREATE TABLE IF NOT EXISTS ticker_names (
     corp_code TEXT PRIMARY KEY,
@@ -50,4 +75,6 @@ def initialize_db(conn) -> None:
         conn.execute(CREATE_COMPANIES_TABLE)
         conn.execute(CREATE_FINANCIALS_TABLE)
         conn.execute(CREATE_FINANCIALS_UNIQUE_INDEX)
+        conn.execute(CREATE_FINANCIALS_HISTORY_TABLE)
+        conn.execute(CREATE_FINANCIALS_HISTORY_UNIQUE_INDEX)
         conn.execute(CREATE_TICKER_NAMES_TABLE)

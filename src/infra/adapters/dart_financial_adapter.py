@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import time
 from datetime import date, datetime
 from pathlib import Path
 
@@ -111,10 +112,7 @@ class DartFinancialAdapter(FinancialStatementPort, ApiFinancialCollectorPort):
             params = self._build_api_params(corp_code, year, report_type, fs_type)
 
             try:
-                self._call_count += 1
-                response = requests.get(self._API_URL, params=params, timeout=30)
-                response.raise_for_status()
-                data = response.json()
+                data = self._request_with_rate_limit_retry(params, corp_code, year, fs_type)
 
                 # 파싱 (CFS 또는 OFS 추출)
                 new_results = DartResponseParser.parse_all(
@@ -126,9 +124,17 @@ class DartFinancialAdapter(FinancialStatementPort, ApiFinancialCollectorPort):
                     fs = new_results[fs_type]
                     self._save_to_cache(fs)
                     results[fs_type] = fs
-                else:
-                    # 응답에 없는 경우 '데이터 없음'으로 캐시
+                elif data.get("status") == "013":
+                    # DART가 명시적으로 "조회된 데이타가 없습니다"라고 응답한 경우에만
+                    # '데이터 없음'으로 영구 캐시한다. 그 외(레이트리밋 "020", 인증오류,
+                    # 서버에러 등)는 일시적 실패일 수 있으므로 캐시하지 않고 다음 실행에서 재시도한다.
                     self._save_negative_cache(corp_code, year, report_type, fs_type)
+                else:
+                    logger.error(
+                        f"DART API 비정상 응답으로 데이터 없음 확정 불가 (재시도 대상): "
+                        f"{corp_code} {year} {report_type.value} ({fs_type.value}) "
+                        f"status={data.get('status')}"
+                    )
 
             except Exception as e:
                 logger.error(
@@ -136,6 +142,38 @@ class DartFinancialAdapter(FinancialStatementPort, ApiFinancialCollectorPort):
                 )
 
         return results
+
+    def _request_with_rate_limit_retry(
+        self,
+        params: dict[str, str],
+        corp_code: str,
+        year: int,
+        fs_type: FinancialStatementType,
+        max_retries: int = 3,
+        backoff_seconds: float = 5.0,
+    ) -> dict:
+        """DART API 호출. 레이트리밋(status 020) 응답이면 잠시 대기 후 재시도한다.
+
+        재시도를 다 소진해도 020이면 마지막 응답을 그대로 반환한다 (호출부에서
+        013이 아니므로 음성 캐시를 남기지 않고 다음 실행에서 재시도하게 된다).
+        """
+        for attempt in range(max_retries + 1):
+            self._call_count += 1
+            response = requests.get(self._API_URL, params=params, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get("status") != "020":
+                return data
+
+            if attempt < max_retries:
+                logger.warning(
+                    f"DART API 레이트리밋(020) 감지, {backoff_seconds}초 대기 후 재시도 "
+                    f"({attempt + 1}/{max_retries}): {corp_code} {year} ({fs_type.value})"
+                )
+                time.sleep(backoff_seconds)
+
+        return data
 
     def _get_fs_type_priority(
         self, prefer_consolidated: bool

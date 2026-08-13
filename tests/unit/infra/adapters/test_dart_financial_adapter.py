@@ -131,6 +131,76 @@ def test_api_error_handling(adapter):
     assert statement is None
 
 
+def test_negative_cache_written_only_on_genuine_no_data(tmp_path):
+    """status=013(진짜 데이터 없음)일 때만 영구 '없음' 캐시를 남기고,
+    레이트리밋(020) 등 다른 비정상 응답은 캐시하지 않아 다음 실행에서 재시도되어야 한다."""
+    with patch.dict(os.environ, {"DART_API_KEY": "dummy_key"}):
+        adapter = DartFinancialAdapter(use_cache=True, cache_dir=str(tmp_path))
+
+    # 1. 진짜 013 응답 -> 영구 캐시 생성됨
+    with patch("requests.get") as mock_get:
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"status": "013", "message": "조회된 데이타가 없습니다."}
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        adapter.get_all_statements("00573579", 2017, ReportType.Q1)
+
+    cache_files = list((tmp_path / "00573579").glob("*.json"))
+    assert len(cache_files) == 2  # CFS, OFS 각각
+    for f in cache_files:
+        with open(f, encoding="utf-8") as fh:
+            assert json.load(fh)["status"] == "013"
+
+    # 2. 다른 기업으로 레이트리밋(020) 응답 -> 캐시 생성되면 안 됨 (재시도 대상으로 남아야 함)
+    with patch("requests.get") as mock_get, patch(
+        "infra.adapters.dart_financial_adapter.time.sleep"
+    ):
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"status": "020", "message": "사용한도 초과"}
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        adapter.get_all_statements("00999999", 2017, ReportType.Q1)
+
+    assert not (tmp_path / "00999999").exists() or not list(
+        (tmp_path / "00999999").glob("*.json")
+    )
+
+
+def test_rate_limit_retries_then_succeeds(adapter):
+    """020(레이트리밋) 응답 후 재시도에서 정상(000) 응답이 오면 결과를 정상 반환해야 한다."""
+    ok_response = {
+        "status": "000",
+        "list": [
+            {
+                "corp_code": "00126380",
+                "corp_name": "삼성전자",
+                "thstrm_dt": "2023.01.01 ~ 2023.12.31",
+                "account_nm": "매출액",
+                "thstrm_amount": "100",
+                "sj_div": "IS",
+            }
+        ],
+    }
+    rate_limited_response = {"status": "020", "message": "사용한도 초과"}
+
+    with patch("requests.get") as mock_get, patch(
+        "infra.adapters.dart_financial_adapter.time.sleep"
+    ) as mock_sleep:
+        mock_get.side_effect = [
+            MagicMock(json=lambda: rate_limited_response, raise_for_status=lambda: None),
+            MagicMock(json=lambda: ok_response, raise_for_status=lambda: None),
+        ]
+
+        statement = adapter.get_financial_statement(
+            "00126380", 2023, ReportType.ANNUAL, prefer_consolidated=True
+        )
+
+    assert statement is not None
+    assert mock_sleep.called
+
+
 def test_get_disclosures_success(adapter):
     """공시 검색 API 정상 조회 및 결과 매핑 테스트."""
     mock_list_response = {

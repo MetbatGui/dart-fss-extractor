@@ -1,4 +1,5 @@
 import os
+import time
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Mapping, Sequence
@@ -25,6 +26,7 @@ class CorpCodeAdapter(CorpCodePort):
         force_download: bool = False,
         target_companies_path: str = "data/target_companies.csv",
         cache_dir: str | None = None,
+        max_age_days: int = 30,
     ) -> None:
         """생성자.
 
@@ -32,6 +34,7 @@ class CorpCodeAdapter(CorpCodePort):
             force_download: ``True``이면 매 호출 시 최신 XML을 다운로드한다.
             target_companies_path: 타겟 기업 목록 파일 경로 (캐시 비교용)
             cache_dir: 캐시 저장 경로 (None이면 OUTPUT_DIRECTORY 환경변수 기반 기본 경로 사용)
+            max_age_days: 캐시 파일이 이보다 오래되면 재다운로드한다 (기본 30일, 월 1회 주기 갱신)
         """
         if cache_dir:
             self._CACHE_DIR = Path(cache_dir).resolve()
@@ -44,6 +47,7 @@ class CorpCodeAdapter(CorpCodePort):
 
         self._force_download = force_download
         self._target_companies_path = target_companies_path
+        self._max_age_days = max_age_days
         self._ensure_data()
 
     # ---------------------------------------------------------------------
@@ -78,6 +82,19 @@ class CorpCodeAdapter(CorpCodePort):
                         f"캐시({self._XML_PATH.name})보다 최신입니다. 고유번호를 재다운로드합니다."
                     )
                     should_download = True
+
+        # 캐시가 max_age_days보다 오래되면 재다운로드 (사명변경/신규상장 등 주기적 반영)
+        if not should_download and self._XML_PATH.is_file():
+            age_days = (time.time() - self._XML_PATH.stat().st_mtime) / 86400
+            if age_days > self._max_age_days:
+                import logging
+
+                logger = logging.getLogger(__name__)
+                logger.info(
+                    f"[캐시 무효화] 고유번호 캐시가 {age_days:.1f}일 경과하여 "
+                    f"({self._max_age_days}일 초과) 재다운로드합니다."
+                )
+                should_download = True
 
         if should_download:
             self._download_and_extract()

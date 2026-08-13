@@ -138,6 +138,10 @@ class SqliteRepositoryAdapter(RepositoryPort):
                 def clean_val(v):
                     return None if pd.isna(v) else float(v)
 
+                rev_val = clean_val(row.get("매출액"))
+                op_val = clean_val(row.get("영업이익"))
+                ni_val = clean_val(row.get("당기순이익"))
+
                 self._conn.execute(
                     query,
                     (
@@ -147,12 +151,36 @@ class SqliteRepositoryAdapter(RepositoryPort):
                         division,
                         quarter,
                         row_detail,
-                        clean_val(row.get("매출액")),
-                        clean_val(row.get("영업이익")),
-                        clean_val(row.get("당기순이익")),
+                        rev_val,
+                        op_val,
+                        ni_val,
                         rcept_no,
                     ),
                 )
+
+                # 실제 공시(rcept_no)에서 온 값만 정정 이력으로 남긴다.
+                # (JSON 캐시 재처리 등 rcept_no 없는 배치성 재적재는 실제 정정이 아니므로 제외)
+                if rcept_no:
+                    self._conn.execute(
+                        """
+                        INSERT OR IGNORE INTO financials_history (
+                            corp_code, corp_name, year, division, quarter, detail_type,
+                            revenue, operating_profit, net_income, rcept_no
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            partition_name,
+                            str(row.get("기업명")),
+                            year,
+                            division,
+                            quarter,
+                            row_detail,
+                            rev_val,
+                            op_val,
+                            ni_val,
+                            rcept_no,
+                        ),
+                    )
 
     def load_partition(self, dataset_name: str, partition_name: str) -> pd.DataFrame:
         """특정 기업의 적재된 실적 데이터를 판다스 DataFrame으로 가져옵니다."""
@@ -172,6 +200,25 @@ class SqliteRepositoryAdapter(RepositoryPort):
 
         df = pd.read_sql_query(query, self._conn, params=[partition_name, detail_type])
         return df
+
+    def load_history(
+        self, corp_code: str, year: int, quarter: str, detail_type: str = "연결"
+    ) -> pd.DataFrame:
+        """특정 기업/기간에 대해 그동안 수집된 모든 정정 이력(각 rcept_no별 값)을 시간순으로 반환합니다.
+
+        가장 마지막 행(created_at 최댓값)이 현재 financials 테이블의 값과 일치하는 최신본입니다.
+        """
+        query = """
+        SELECT corp_name AS 기업명, year AS 연도, division AS 구분, quarter AS 분기,
+               detail_type AS 구분_상세, revenue AS 매출액, operating_profit AS 영업이익,
+               net_income AS 당기순이익, rcept_no, created_at
+        FROM financials_history
+        WHERE corp_code = ? AND year = ? AND quarter = ? AND detail_type = ?
+        ORDER BY created_at ASC
+        """
+        return pd.read_sql_query(
+            query, self._conn, params=[corp_code, year, quarter, detail_type]
+        )
 
     def exists(self, dataset_name: str, partition_name: str) -> bool:
         """특정 기업의 실적이 DB 내에 존재하는지 신속 스캔."""

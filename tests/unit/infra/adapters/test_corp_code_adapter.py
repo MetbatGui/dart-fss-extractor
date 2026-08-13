@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 
 import pytest
+from freezegun import freeze_time
 
 from infra.adapters.corp_code_adapter import CorpCodeAdapter
 
@@ -178,6 +179,64 @@ def test_smart_cache_invalidation() -> None:
         # 다시 어댑터 생성 (target_mtime > cache_mtime이므로 자동 강제 다운로드 유발)
         _ = CorpCodeAdapter(force_download=False, target_companies_path=str(target_csv))
         assert mock_get.call_count == 1
+
+    # Cleanup
+    shutil.rmtree(temp_root)
+
+
+def test_cache_expires_after_max_age_days() -> None:
+    """캐시 파일이 max_age_days보다 오래되면 자동 재다운로드되는지 확인 (freezegun으로 시간 경과 시뮬레이션)."""
+    import shutil
+    import tempfile
+    import zipfile
+    import io
+    from datetime import datetime, timedelta
+    from unittest.mock import patch, MagicMock
+
+    temp_root = Path(tempfile.mkdtemp())
+
+    dummy_xml = (
+        b"<result><list><corp_code>12345678</corp_code><corp_name>Test Corp</corp_name>"
+        b"<stock_code>123456</stock_code><modify_date>20230101</modify_date></list>"
+        + b"<!-- " + b"x" * 2000 + b" --></result>"
+    )
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_STORED) as zf:
+        zf.writestr("CORPCODE.xml", dummy_xml)
+
+    mock_response = MagicMock()
+    mock_response.content = zip_buffer.getvalue()
+    mock_response.raise_for_status.return_value = None
+
+    with patch.dict(os.environ, {"OUTPUT_DIRECTORY": str(temp_root), "DART_API_KEY": "dummy_key"}), \
+         patch("requests.get", return_value=mock_response) as mock_get:
+
+        now = datetime.now()
+
+        # 1. 최초 다운로드 (기준 시각 고정)
+        with freeze_time(now):
+            adapter = CorpCodeAdapter(force_download=False, max_age_days=30)
+            assert mock_get.call_count == 1
+
+        mock_get.reset_mock()
+
+        # 2. 29일 경과: max_age_days(30일) 미만이므로 재다운로드 없어야 함
+        with freeze_time(now + timedelta(days=29)):
+            _ = CorpCodeAdapter(
+                force_download=False,
+                target_companies_path=str(adapter._target_companies_path),
+                max_age_days=30,
+            )
+            assert mock_get.call_count == 0
+
+        # 3. 31일 경과: max_age_days 초과이므로 자동 재다운로드되어야 함
+        with freeze_time(now + timedelta(days=31)):
+            _ = CorpCodeAdapter(
+                force_download=False,
+                target_companies_path=str(adapter._target_companies_path),
+                max_age_days=30,
+            )
+            assert mock_get.call_count == 1
 
     # Cleanup
     shutil.rmtree(temp_root)
