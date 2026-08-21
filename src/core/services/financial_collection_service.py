@@ -88,8 +88,13 @@ class FinancialCollectionService:
                 try:
                     settlement_month = self._financial_port.get_settlement_month(code)
                 except Exception as e:
-                    logger.error(f"신규 기업 {name} ({code}) 결산월 조회 실패: {e}")
-                    settlement_month = 12
+                    # 결산월은 최초 1회만 조회되어 영구 저장되므로, 재시도 후에도
+                    # 실패하면 12(기본값)로 잘못 고정하지 말고 이번 회차는 건너뛰어
+                    # 다음 수집 시도에서 다시 조회되도록 한다.
+                    logger.error(
+                        f"신규 기업 {name} ({code}) 결산월 조회 실패, 이번 회차는 건너뜁니다: {e}"
+                    )
+                    continue
                 company = Company(
                     code=code, name=name, settlement_month=settlement_month
                 )

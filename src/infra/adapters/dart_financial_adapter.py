@@ -411,28 +411,45 @@ class DartFinancialAdapter(FinancialStatementPort, ApiFinancialCollectorPort):
 
         return all_disclosures
 
-    def get_settlement_month(self, corp_code: str) -> int:
+    def get_settlement_month(
+        self, corp_code: str, max_retries: int = 3, retry_backoff: float = 2.0
+    ) -> int:
         """DART 기업개황 API를 통해 결산월을 조회합니다.
 
-        조회된 결과는 정수로 반환하며, 실패 시 기본값 12를 반환합니다.
+        조회된 결과는 정수로 반환합니다. 이 값은 Company 메타데이터에 최초 1회만
+        저장되어 이후 재조회되지 않으므로, 일시적 커넥션 오류로 실패해도 기본값
+        12를 반환해서는 안 됩니다 (실제 결산월이 12월이 아닌 기업이 영구히 잘못된
+        값으로 고정되는 것을 방지). 재시도로도 끝내 확인하지 못하면 예외를 그대로
+        전파해 호출부(financial_collection_service)가 재시도 대상으로 처리하게 합니다.
         """
         url = "https://opendart.fss.or.kr/api/company.json"
         params = {"crtfc_key": self._api_key, "corp_code": corp_code}
-        try:
-            self._call_count += 1
-            resp = requests.get(url, params=params, timeout=15)
-            resp.raise_for_status()
-            data = resp.json()
-            if data.get("status") == "000":
-                acc_mt = data.get("acc_mt", "12")
-                logger.info(
-                    f"DART에서 기업({corp_code})의 결산월 조회 성공: {acc_mt}월"
-                )
-                return int(acc_mt)
-            else:
+        last_error: Exception | None = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                self._call_count += 1
+                resp = requests.get(url, params=params, timeout=15)
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("status") == "000":
+                    acc_mt = data.get("acc_mt", "12")
+                    logger.info(
+                        f"DART에서 기업({corp_code})의 결산월 조회 성공: {acc_mt}월"
+                    )
+                    return int(acc_mt)
                 logger.warning(
                     f"DART 기업개황 API 응답 이상 ({data.get('status')}): {data.get('message')}"
                 )
-        except Exception as e:
-            logger.error(f"DART 기업개황 API 호출 중 오류 발생: {e}")
-        return 12
+                return 12
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    wait = retry_backoff * attempt
+                    logger.warning(
+                        f"  ⚠️ [재시도 {attempt}/{max_retries}] 결산월 조회 커넥션 오류로 "
+                        f"{wait}초 대기 후 재시도 ({corp_code}): {e}"
+                    )
+                    time.sleep(wait)
+        raise RuntimeError(
+            f"결산월 조회 실패 (max_retries={max_retries}, corp_code={corp_code}): {last_error}"
+        )

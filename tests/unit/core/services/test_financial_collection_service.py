@@ -222,6 +222,30 @@ def test_collect_and_save_marks_failure_when_all_metrics_are_empty(
     assert 2023 in saved_company.failed_years
 
 
+def test_settlement_month_lookup_failure_skips_company_instead_of_defaulting(
+    service,
+    mock_corp_code_port,
+    mock_financial_port,
+    mock_processing_service,
+    mock_repository_port,
+    mock_export_port,
+):
+    """신규 기업의 결산월 조회가 (재시도 후에도) 끝내 실패하면, 12월로 잘못
+    고정하여 영구 저장하지 말고 이번 회차를 건너뛰어야 한다 (다음 수집 시도에서
+    재조회되도록). 과거엔 실패 시 무조건 12로 기본값 처리 후 영구 저장했음.
+    """
+    company_names = ["FlakyCorp"]
+    mock_corp_code_port.get_codes.return_value = ["77777777"]
+    mock_repository_port.load_company_metadata.return_value = None
+    mock_financial_port.get_settlement_month.side_effect = Exception("connection reset")
+
+    service.collect_and_save(company_names, 2023, 2023, "test.xlsx")
+
+    # 결산월 조회 실패 시 이번 회차는 아예 건너뛰어야 하므로 메타데이터가 저장되지 않는다
+    mock_repository_port.save_company_metadata.assert_not_called()
+    mock_repository_port.save_partition.assert_not_called()
+
+
 def test_annual_row_calendar_year_matches_non_december_settlement(
     service,
     mock_corp_code_port,
