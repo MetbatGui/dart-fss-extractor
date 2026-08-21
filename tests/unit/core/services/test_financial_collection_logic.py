@@ -5,10 +5,13 @@ from decimal import Decimal
 import pandas as pd
 from core.domain.models.company import Company
 from core.domain.models.performance_metrics import QuarterlyMetrics, FinancialMetrics
-from core.domain.models.financial_statement import FinancialStatement
+from core.domain.models.financial_statement import (
+    FinancialStatement,
+    FinancialStatementType,
+)
 from core.services.financial_collection_service import FinancialCollectionService
 from core.ports.corp_code_port import CorpCodePort
-from core.ports.financial_statement_port import FinancialStatementPort
+from core.ports.api_financial_collector_port import ApiFinancialCollectorPort
 from core.ports.repository_port import RepositoryPort
 from core.ports.export_port import ExportPort
 from core.services.data_processing_service import DataProcessingService
@@ -19,7 +22,11 @@ def mock_corp_code_port():
 
 @pytest.fixture
 def mock_financial_port():
-    return Mock(spec=FinancialStatementPort)
+    mock = Mock(spec=ApiFinancialCollectorPort)
+    mock.get_all_statements.return_value = {
+        FinancialStatementType.CONSOLIDATED: Mock(spec=FinancialStatement)
+    }
+    return mock
 
 @pytest.fixture
 def mock_repository_port():
@@ -61,7 +68,7 @@ def test_smart_skip_if_fully_collected(
     service.collect_and_save(company_names, 2023, 2024, "test.xlsx")
     
     # API 호출이 없어야 함
-    mock_financial_port.get_financial_statement.assert_not_called()
+    mock_financial_port.get_all_statements.assert_not_called()
     # 저장도 불필요 (건너뜀)
     mock_repository_port.save_partition.assert_not_called()
 
@@ -91,7 +98,6 @@ def test_merge_with_existing_data(
     
     # 2. 새 데이터 수집 (2024년 요청)
     # 2023은 건너뛰고 2024만 수집될 것임
-    mock_financial_port.get_financial_statement.return_value = Mock(spec=FinancialStatement)
     
     mock_metrics = QuarterlyMetrics(corp_name="MergeCorp")
     mock_metrics.metrics_by_quarter = {
@@ -142,7 +148,6 @@ def test_non_contiguous_gap_filling(
     mock_repository_port.load_partition.return_value = existing_df
     
     # 2. 수집 요청 (2022~2024) -> 2023만 수집 시도
-    mock_financial_port.get_financial_statement.return_value = Mock(spec=FinancialStatement)
     mock_metrics = QuarterlyMetrics(corp_name="GapCorp")
     mock_metrics.metrics_by_quarter = {"1Q": FinancialMetrics(revenue=Decimal("200"))}
     mock_processing_service.calculate_quarterly_performance.return_value = mock_metrics
@@ -186,7 +191,6 @@ def test_duplicate_handling_keep_last(
     mock_repository_port.load_partition.return_value = existing_df
     
     # 2. 새 데이터 (매출액 999로 변경)
-    mock_financial_port.get_financial_statement.return_value = Mock(spec=FinancialStatement)
     mock_metrics = QuarterlyMetrics(corp_name="DupCorp")
     mock_metrics.metrics_by_quarter = {"1Q": FinancialMetrics(revenue=Decimal("999"))}
     mock_processing_service.calculate_quarterly_performance.return_value = mock_metrics
@@ -240,7 +244,6 @@ def test_sync_and_skip_failed(service, mock_repository_port, mock_corp_code_port
     # 2024: 신규 -> 수집 시도
     
     # Mock responses for collection (2024 or 2022)
-    mock_financial_port.get_financial_statement.return_value = Mock(spec=FinancialStatement)
     mock_metrics = QuarterlyMetrics(corp_name=name)
     mock_metrics.metrics_by_quarter = {"1Q": FinancialMetrics(revenue=Decimal("400"), operating_profit=0, net_income=0)}
     mock_processing_service.calculate_quarterly_performance.return_value = mock_metrics
