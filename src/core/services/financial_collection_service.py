@@ -231,7 +231,12 @@ class FinancialCollectionService:
 
                     # 데이터 리스트에 추가
                     has_valid_data = self._append_to_list(
-                        company_data, name, year, metrics, company.settlement_month
+                        company_data,
+                        name,
+                        year,
+                        metrics,
+                        company.settlement_month,
+                        target_fs_type,
                     )
 
                     if has_valid_data:
@@ -365,6 +370,7 @@ class FinancialCollectionService:
         year: int,
         metrics: QuarterlyMetrics,
         settlement_month: int = 12,
+        target_fs_type: FinancialStatementType = FinancialStatementType.CONSOLIDATED,
     ) -> bool:
         """계산된 지표를 리스트에 추가 (Long Format)하며 결산월 기준 캘린더 분기로 보정합니다.
 
@@ -372,6 +378,9 @@ class FinancialCollectionService:
             실제 값(매출액/영업이익/당기순이익 중 하나 이상)이 존재하는 데이터가 있었으면 True.
         """
         has_valid_data = False
+        detail_type = (
+            "연결" if target_fs_type == FinancialStatementType.CONSOLIDATED else "개별"
+        )
 
         # 1. 분기 데이터 추가
         for q in ["1Q", "2Q", "3Q", "4Q"]:
@@ -394,7 +403,7 @@ class FinancialCollectionService:
                         "연도": calendar_year,
                         "구분": "분기",
                         "분기": calendar_quarter,
-                        "구분_상세": "연결",
+                        "구분_상세": detail_type,
                         "매출액": m.revenue,
                         "영업이익": m.operating_profit,
                         "당기순이익": m.net_income,
@@ -412,7 +421,7 @@ class FinancialCollectionService:
                     "연도": year,
                     "구분": "연간",
                     "분기": "연간",
-                    "구분_상세": "연결",
+                    "구분_상세": detail_type,
                     "매출액": metrics.annual_metrics.revenue,
                     "영업이익": metrics.annual_metrics.operating_profit,
                     "당기순이익": metrics.annual_metrics.net_income,
@@ -435,7 +444,7 @@ class FinancialCollectionService:
                         "연도": year,
                         "구분": "연간",
                         "분기": "연간",  # Pivot시 사용 안함
-                        "구분_상세": "연결",
+                        "구분_상세": detail_type,
                         "매출액": annual.revenue,
                         "영업이익": annual.operating_profit,
                         "당기순이익": annual.net_income,
