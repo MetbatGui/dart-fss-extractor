@@ -201,6 +201,39 @@ def test_rate_limit_retries_then_succeeds(adapter):
     assert mock_sleep.called
 
 
+def test_get_settlement_month_retries_then_succeeds(adapter):
+    """결산월 조회가 커넥션 오류로 실패해도 재시도에서 성공하면 정상 값을 반환해야 한다."""
+    ok_response = {"status": "000", "acc_mt": "03"}
+
+    with patch("requests.get") as mock_get, patch(
+        "infra.adapters.dart_financial_adapter.time.sleep"
+    ) as mock_sleep:
+        mock_get.side_effect = [
+            ConnectionError("connection reset"),
+            MagicMock(json=lambda: ok_response, raise_for_status=lambda: None),
+        ]
+
+        settlement_month = adapter.get_settlement_month("00126380")
+
+    assert settlement_month == 3
+    assert mock_sleep.called
+
+
+def test_get_settlement_month_raises_after_exhausting_retries(adapter):
+    """재시도를 모두 소진하도록 계속 실패하면, 12로 조용히 기본값 처리하지 않고
+    예외를 그대로 전파해야 한다 (호출부가 이번 회차를 건너뛰고 다음에 재시도하도록).
+    """
+    with patch("requests.get") as mock_get, patch(
+        "infra.adapters.dart_financial_adapter.time.sleep"
+    ):
+        mock_get.side_effect = ConnectionError("connection reset")
+
+        with pytest.raises(RuntimeError):
+            adapter.get_settlement_month("00126380", max_retries=3)
+
+    assert mock_get.call_count == 3
+
+
 def test_get_disclosures_success(adapter):
     """공시 검색 API 정상 조회 및 결과 매핑 테스트."""
     mock_list_response = {
