@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import time
 from datetime import date, datetime
 from pathlib import Path
@@ -299,6 +300,7 @@ class DartFinancialAdapter(FinancialStatementPort, ApiFinancialCollectorPort):
             else None,
             "end_date": statement.end_date.isoformat() if statement.end_date else None,
             "is_cumulative": statement.is_cumulative,
+            "rcept_no": statement.rcept_no,
         }
 
         with cache_path.open("w", encoding="utf-8") as f:
@@ -358,9 +360,44 @@ class DartFinancialAdapter(FinancialStatementPort, ApiFinancialCollectorPort):
                 start_date=start_date,
                 end_date=end_date,
                 is_cumulative=is_cumulative,
+                rcept_no=data.get("rcept_no"),
             )
         except (json.JSONDecodeError, KeyError, ValueError):
             return None
+
+    def get_report_period(self, corp_code: str, rcept_no: str) -> tuple[int, int] | None:
+        """접수번호(rcept_no)로 공시목록을 재조회해 보고서 제목에 명시된 실제
+        마감연월(예: "반기보고서 (2026.03)" -> (2026, 3))을 반환합니다.
+
+        결산월 기반 회계연도 환산은 보고서 종류(1분기/반기/3분기/사업)마다
+        DART의 bsns_year 의미가 달라 신뢰할 수 없으므로, 보고서 제목에 DART가
+        직접 명시한 마감연월을 그대로 쓰는 것이 유일하게 정확한 방법입니다.
+        """
+        cache_path = self._cache_dir / "report_periods" / f"{rcept_no}.json"
+        if cache_path.exists():
+            try:
+                data = json.loads(cache_path.read_text(encoding="utf-8"))
+                period = data.get("period")
+                return tuple(period) if period else None
+            except (json.JSONDecodeError, KeyError, ValueError):
+                pass
+
+        filing_date = rcept_no[:8]
+        disclosures = self.get_disclosures(filing_date, filing_date)
+        period = None
+        for item in disclosures:
+            if item.get("rcept_no") == rcept_no:
+                m = re.search(r"\((\d{4})\.(\d{2})\)", item.get("report_nm", ""))
+                if m:
+                    period = (int(m.group(1)), int(m.group(2)))
+                break
+
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(
+            json.dumps({"period": list(period) if period else None}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return period
 
     def get_disclosures(
         self, bgn_de: str, end_de: str, pblntf_ty: str = "A"

@@ -72,6 +72,7 @@ class FinancialStatement:
     fs_type: FinancialStatementType
     accounts: list[AccountItem]
     extracted_at: datetime = field(default_factory=datetime.now)
+    rcept_no: str | None = None  # 접수번호 (실제 제출/마감일자 역산용)
 
     # 기간 정보 (정확한 계산을 위해 추가)
     start_date: date | None = None

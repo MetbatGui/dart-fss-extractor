@@ -235,6 +235,12 @@ class FinancialCollectionService:
                     )
 
                     # 데이터 리스트에 추가
+                    source_stmt_by_quarter = {
+                        "1Q": q1,
+                        "2Q": semi,
+                        "3Q": q3,
+                        "4Q": annual,
+                    }
                     has_valid_data = self._append_to_list(
                         company_data,
                         name,
@@ -242,6 +248,7 @@ class FinancialCollectionService:
                         metrics,
                         company.settlement_month,
                         target_fs_type,
+                        source_stmt_by_quarter,
                     )
 
                     if has_valid_data:
@@ -368,6 +375,42 @@ class FinancialCollectionService:
         except Exception as e:
             logger.error(f"통합 엑셀 파일 생성 중 오류 발생: {e}")
 
+    def _resolve_calendar_label(
+        self,
+        stmt,
+        fallback_year: int,
+        fallback_quarter: str,
+        settlement_month: int,
+        name: str,
+    ) -> tuple[int, str]:
+        """실제 캘린더 분기/연도를 결정합니다.
+
+        결산월 기반 공식(Company.to_calendar_period)은 DART의 bsns_year 의미가
+        보고서 종류(1분기 vs 반기/3분기/사업)마다 달라 신뢰할 수 없음이 확인됨
+        (예: 반기/3분기/사업 보고서는 실제보다 캘린더 연도가 1년 밀려서 계산됨).
+        따라서 보고서의 rcept_no로 공시목록을 재조회해 제목에 명시된 실제
+        마감연월을 직접 사용하고, 조회 실패 시에만 결산월 공식으로 폴백한다.
+        """
+        if settlement_month != 12 and stmt is not None and getattr(stmt, "rcept_no", None):
+            try:
+                period = self._financial_port.get_report_period(
+                    stmt.corp_code, stmt.rcept_no
+                )
+            except Exception as e:
+                logger.warning(f"[{name}] 실제 마감연월 조회 실패, 결산월 공식으로 대체: {e}")
+                period = None
+            if period:
+                real_year, real_month = period
+                return real_year, f"{(real_month - 1) // 3 + 1}Q"
+
+        try:
+            return Company(
+                code="", name=name, settlement_month=settlement_month
+            ).to_calendar_period(fallback_year, fallback_quarter)
+        except Exception as e:
+            logger.error(f"[{name}] 캘린더 분기 보정 계산 중 오류: {e}")
+            return fallback_year, fallback_quarter
+
     def _append_to_list(
         self,
         data_list: list[dict],
@@ -376,6 +419,7 @@ class FinancialCollectionService:
         metrics: QuarterlyMetrics,
         settlement_month: int = 12,
         target_fs_type: FinancialStatementType = FinancialStatementType.CONSOLIDATED,
+        source_stmt_by_quarter: dict | None = None,
     ) -> bool:
         """계산된 지표를 리스트에 추가 (Long Format)하며 결산월 기준 캘린더 분기로 보정합니다.
 
@@ -386,6 +430,7 @@ class FinancialCollectionService:
         detail_type = (
             "연결" if target_fs_type == FinancialStatementType.CONSOLIDATED else "개별"
         )
+        source_stmt_by_quarter = source_stmt_by_quarter or {}
 
         # 1. 분기 데이터 추가
         for q in ["1Q", "2Q", "3Q", "4Q"]:
@@ -393,14 +438,9 @@ class FinancialCollectionService:
             if m:
                 if m.is_valid:
                     has_valid_data = True
-                # 캘린더 분기 보정 (Company.to_calendar_period에 위임하여 로직 중복/불일치 방지)
-                try:
-                    calendar_year, calendar_quarter = Company(
-                        code="", name=name, settlement_month=settlement_month
-                    ).to_calendar_period(year, q)
-                except Exception as e:
-                    logger.error(f"[{name}] 캘린더 분기 보정 계산 중 오류: {e}")
-                    calendar_year, calendar_quarter = year, q
+                calendar_year, calendar_quarter = self._resolve_calendar_label(
+                    source_stmt_by_quarter.get(q), year, q, settlement_month, name
+                )
 
                 data_list.append(
                     {
@@ -419,13 +459,9 @@ class FinancialCollectionService:
         # QuarterlyMetrics.annual_metrics가 있으면 이를 사용하고, 없으면 분기 합산으로 처리.
         # 연간 실적의 "연도"는 결산월 기준 회계연도 종료 시점의 캘린더 연도로 맞춘다
         # (4Q와 동일한 연도를 부여해, 분기 라벨과 어긋나지 않도록 함).
-        try:
-            annual_calendar_year, _ = Company(
-                code="", name=name, settlement_month=settlement_month
-            ).to_calendar_period(year, "4Q")
-        except Exception as e:
-            logger.error(f"[{name}] 연간 캘린더 연도 보정 계산 중 오류: {e}")
-            annual_calendar_year = year
+        annual_calendar_year, _ = self._resolve_calendar_label(
+            source_stmt_by_quarter.get("4Q"), year, "4Q", settlement_month, name
+        )
 
         if metrics.annual_metrics and metrics.annual_metrics.is_valid:
             # 원본 연간 데이터 사용

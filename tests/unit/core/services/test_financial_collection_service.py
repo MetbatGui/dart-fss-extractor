@@ -246,6 +246,60 @@ def test_settlement_month_lookup_failure_skips_company_instead_of_defaulting(
     mock_repository_port.save_partition.assert_not_called()
 
 
+def test_resolve_calendar_label_uses_real_report_title_period(
+    service, mock_financial_port
+):
+    """settlement_month 공식은 보고서 종류마다 DART bsns_year 의미가 달라 신뢰할 수
+    없음이 확인됨 (예: 반기/3분기/사업 보고서는 실제보다 캘린더 연도가 1년 밀림).
+    rcept_no로 조회한 보고서 제목의 실제 마감연월(예: "(2026.03)")을 우선 써야 한다.
+    """
+    stmt = FinancialStatement(
+        corp_code="00544452",
+        corp_name="이리츠코크렙",
+        bsns_year=2026,
+        reprt_type=ReportType.SEMI_ANNUAL,
+        fs_type=FinancialStatementType.CONSOLIDATED,
+        accounts=[],
+        rcept_no="20260515001091",
+    )
+    # 결산월 공식대로면 (2026, '4Q')가 나오지만, 실제 보고서 마감월은 2026.03 = 1Q
+    mock_financial_port.get_report_period.return_value = (2026, 3)
+
+    year, quarter = service._resolve_calendar_label(
+        stmt, fallback_year=2026, fallback_quarter="2Q", settlement_month=6, name="이리츠코크렙"
+    )
+
+    mock_financial_port.get_report_period.assert_called_once_with(
+        "00544452", "20260515001091"
+    )
+    assert (year, quarter) == (2026, "1Q")
+
+
+def test_resolve_calendar_label_falls_back_when_period_lookup_fails(
+    service, mock_financial_port
+):
+    """rcept_no 조회가 실패(예외/None)하면 결산월 공식으로 안전하게 폴백해야 한다."""
+    stmt = FinancialStatement(
+        corp_code="00120872",
+        corp_name="테스트기업",
+        bsns_year=2026,
+        reprt_type=ReportType.Q3,
+        fs_type=FinancialStatementType.CONSOLIDATED,
+        accounts=[],
+        rcept_no="20260601000001",
+    )
+    mock_financial_port.get_report_period.side_effect = Exception("network error")
+
+    year, quarter = service._resolve_calendar_label(
+        stmt, fallback_year=2026, fallback_quarter="3Q", settlement_month=6, name="테스트기업"
+    )
+
+    # settlement_month=6 공식 폴백 결과와 일치해야 함
+    assert (year, quarter) == Company(
+        code="", name="테스트기업", settlement_month=6
+    ).to_calendar_period(2026, "3Q")
+
+
 def test_annual_row_calendar_year_matches_non_december_settlement(
     service,
     mock_corp_code_port,

@@ -47,3 +47,16 @@ class ApiFinancialCollectorPort(ABC):
             결산월 (1~12, 기본값 12)
         """
         raise NotImplementedError
+
+    @abstractmethod
+    def get_report_period(self, corp_code: str, rcept_no: str) -> tuple[int, int] | None:
+        """접수번호로 공시목록을 재조회해 보고서 제목에 명시된 실제 마감연월을 반환합니다.
+
+        Args:
+            corp_code: DART 기업 코드
+            rcept_no: 접수번호
+
+        Returns:
+            (연도, 월) 또는 조회 실패 시 None
+        """
+        raise NotImplementedError
