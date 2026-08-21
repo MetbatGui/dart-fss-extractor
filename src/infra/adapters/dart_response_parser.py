@@ -41,6 +41,7 @@ class DartResponseParser:
             return results
 
         corp_name = items[0].get("corp_name", "")
+        rcept_no = items[0].get("rcept_no")
         start_date, end_date, is_cumulative = DartResponseParser._parse_date_info(
             items, report_type
         )
@@ -63,6 +64,7 @@ class DartResponseParser:
                     start_date=start_date,
                     end_date=end_date,
                     is_cumulative=is_cumulative,
+                    rcept_no=rcept_no,
                 )
         return results
 
