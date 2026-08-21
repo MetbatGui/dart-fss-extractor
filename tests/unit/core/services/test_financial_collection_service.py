@@ -6,12 +6,16 @@ from decimal import Decimal
 import pandas as pd
 
 from core.ports.corp_code_port import CorpCodePort
-from core.ports.financial_statement_port import FinancialStatementPort
+from core.ports.api_financial_collector_port import ApiFinancialCollectorPort
 from core.ports.repository_port import RepositoryPort
 from core.ports.export_port import ExportPort
 from core.services.data_processing_service import DataProcessingService
 from core.services.financial_collection_service import FinancialCollectionService
-from core.domain.models.financial_statement import FinancialStatement, ReportType
+from core.domain.models.financial_statement import (
+    FinancialStatement,
+    FinancialStatementType,
+    ReportType,
+)
 from core.domain.models.performance_metrics import QuarterlyMetrics, FinancialMetrics
 from core.domain.models.company import Company
 
@@ -22,7 +26,11 @@ def mock_corp_code_port():
 
 @pytest.fixture
 def mock_financial_port():
-    return Mock(spec=FinancialStatementPort)
+    mock = Mock(spec=ApiFinancialCollectorPort)
+    mock.get_all_statements.return_value = {
+        FinancialStatementType.CONSOLIDATED: Mock(spec=FinancialStatement)
+    }
+    return mock
 
 @pytest.fixture
 def mock_repository_port():
@@ -77,10 +85,7 @@ def test_collect_and_save_success(
         "기간": "2023.1Q"
     }])
     mock_repository_port.load_all.return_value = saved_df
-    
-    # Financial Statements Mock
-    mock_financial_port.get_financial_statement.return_value = Mock(spec=FinancialStatement)
-    
+
     # Metrics Calculation Mock
     mock_metrics = QuarterlyMetrics(corp_name="TestCorp")
     mock_metrics.metrics_by_quarter = {
@@ -127,7 +132,7 @@ def test_collect_failure_tracking(
     mock_repository_port.load_all.return_value = pd.DataFrame()
 
     # API 에러 발생
-    mock_financial_port.get_financial_statement.side_effect = Exception("API Fail")
+    mock_financial_port.get_all_statements.side_effect = Exception("API Fail")
 
     service.collect_and_save(company_names, 2023, 2023, "test.xlsx")
 
@@ -169,7 +174,6 @@ def test_metadata_sync_ignores_years_with_no_valid_values(
     mock_repository_port.load_partition.return_value = existing_df
     mock_repository_port.load_all.return_value = pd.DataFrame()
 
-    mock_financial_port.get_financial_statement.return_value = Mock(spec=FinancialStatement)
     mock_processing_service.calculate_quarterly_performance.return_value = QuarterlyMetrics(
         corp_name="SyncCorp"
     )
@@ -202,8 +206,6 @@ def test_collect_and_save_marks_failure_when_all_metrics_are_empty(
     mock_repository_port.load_company_metadata.return_value = None
     mock_financial_port.get_settlement_month.return_value = 12
     mock_repository_port.load_all.return_value = pd.DataFrame()
-
-    mock_financial_port.get_financial_statement.return_value = Mock(spec=FinancialStatement)
 
     empty_metrics = QuarterlyMetrics(corp_name="EmptyCorp")
     empty_metrics.metrics_by_quarter = {
@@ -246,8 +248,6 @@ def test_append_to_list_sets_detail_type_for_merge_compatibility(
     mock_repository_port.load_partition.return_value = existing_df
     mock_repository_port.load_all.return_value = pd.DataFrame()
 
-    mock_financial_port.get_financial_statement.return_value = Mock(spec=FinancialStatement)
-
     metrics = QuarterlyMetrics(corp_name="MergeCorp")
     metrics.metrics_by_quarter = {"1Q": FinancialMetrics(revenue=Decimal("1000"))}
     mock_processing_service.calculate_quarterly_performance.return_value = metrics
@@ -284,13 +284,12 @@ def test_retry_on_failure_history(
     mock_repository_port.load_all.return_value = pd.DataFrame() # 마지막 병합용
 
     # 이번엔 성공하도록 설정
-    mock_financial_port.get_financial_statement.return_value = Mock(spec=FinancialStatement)
     mock_processing_service.calculate_quarterly_performance.return_value = QuarterlyMetrics("RetryCorp")
 
     service.collect_and_save(company_names, 2023, 2023, "test.xlsx", skip_failed=False)
 
     # 재시도 수행 확인 (데이터 조회 호출됨)
-    mock_financial_port.get_financial_statement.assert_called()
+    mock_financial_port.get_all_statements.assert_called()
     
     # 메타데이터 저장 확인
     mock_repository_port.save_company_metadata.assert_called_once()

@@ -6,12 +6,11 @@ import time
 import pandas as pd
 
 from core.domain.models.company import Company
-from core.domain.models.financial_statement import ReportType
+from core.domain.models.financial_statement import FinancialStatementType, ReportType
 from core.domain.models.performance_metrics import QuarterlyMetrics
 from core.ports.api_financial_collector_port import ApiFinancialCollectorPort
 from core.ports.corp_code_port import CorpCodePort
 from core.ports.export_port import ExportPort
-from core.ports.financial_statement_port import FinancialStatementPort
 from core.ports.repository_port import RepositoryPort
 from core.services.data_processing_service import DataProcessingService
 
@@ -30,7 +29,7 @@ class FinancialCollectionService:
     def __init__(
         self,
         corp_code_port: CorpCodePort,
-        financial_port: FinancialStatementPort | ApiFinancialCollectorPort,
+        financial_port: ApiFinancialCollectorPort,
         repository_port: RepositoryPort,
         export_port: ExportPort,
         processing_service: DataProcessingService,
@@ -176,30 +175,58 @@ class FinancialCollectionService:
                     continue
 
                 try:
-                    # 각 보고서 조회
+                    # 각 보고서 조회 (연결/개별 모두 확보하여 기업 단위로 일관된 fs_type을 결정)
                     time.sleep(self._request_delay)
-                    q1 = self._financial_port.get_financial_statement(
+                    q1_all = self._financial_port.get_all_statements(
                         code, year, ReportType.Q1
                     )
 
                     time.sleep(self._request_delay)
-                    semi = self._financial_port.get_financial_statement(
+                    semi_all = self._financial_port.get_all_statements(
                         code, year, ReportType.SEMI_ANNUAL
                     )
 
                     time.sleep(self._request_delay)
-                    q3 = self._financial_port.get_financial_statement(
+                    q3_all = self._financial_port.get_all_statements(
                         code, year, ReportType.Q3
                     )
 
                     time.sleep(self._request_delay)
-                    annual = self._financial_port.get_financial_statement(
+                    annual_all = self._financial_port.get_all_statements(
                         code, year, ReportType.ANNUAL
                     )
 
+                    # 보고서 하나라도 연결재무제표를 제출했다면, 해당 기업/연도는 연결 기준으로 통일
+                    reports_all = [q1_all, semi_all, q3_all, annual_all]
+                    target_fs_type = (
+                        FinancialStatementType.CONSOLIDATED
+                        if any(
+                            FinancialStatementType.CONSOLIDATED in r for r in reports_all
+                        )
+                        else FinancialStatementType.SEPARATE
+                    )
+
+                    def _resolve(
+                        report_dict: dict, report_label: str
+                    ) -> object | None:
+                        stmt = report_dict.get(target_fs_type)
+                        if stmt is None and report_dict:
+                            fallback_type = next(iter(report_dict))
+                            logger.warning(
+                                f"[{name} {year} {report_label}] {target_fs_type.value} 미제출, "
+                                f"{fallback_type.value}로 대체합니다."
+                            )
+                            stmt = report_dict[fallback_type]
+                        return stmt
+
+                    q1 = _resolve(q1_all, "1Q")
+                    semi = _resolve(semi_all, "반기")
+                    q3 = _resolve(q3_all, "3Q")
+                    annual = _resolve(annual_all, "사업")
+
                     # 분기 실적 계산
                     metrics = self._processing_service.calculate_quarterly_performance(
-                        q1, semi, q3, annual
+                        q1, semi, q3, annual, target_fs_type=target_fs_type
                     )
 
                     # 데이터 리스트에 추가
