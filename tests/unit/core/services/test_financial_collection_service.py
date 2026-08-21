@@ -222,6 +222,41 @@ def test_collect_and_save_marks_failure_when_all_metrics_are_empty(
     assert 2023 in saved_company.failed_years
 
 
+def test_annual_row_calendar_year_matches_non_december_settlement(
+    service,
+    mock_corp_code_port,
+    mock_financial_port,
+    mock_processing_service,
+    mock_repository_port,
+    mock_export_port,
+):
+    """결산월이 12월이 아닌 기업(예: 6월 결산)의 연간 실적 '연도'는 분기와 마찬가지로
+    회계연도 종료 시점의 캘린더 연도로 보정되어야 한다 (과거엔 fiscal_year 그대로
+    써서 4Q와 다른 연도로 어긋났음).
+    """
+    company_names = ["JuneFYCorp"]
+    mock_corp_code_port.get_codes.return_value = ["66666666"]
+    mock_repository_port.exists.return_value = False
+    mock_repository_port.load_company_metadata.return_value = None
+    mock_financial_port.get_settlement_month.return_value = 6  # 6월 결산
+    mock_repository_port.load_all.return_value = pd.DataFrame()
+
+    metrics = QuarterlyMetrics(corp_name="JuneFYCorp")
+    metrics.metrics_by_quarter = {"4Q": FinancialMetrics(revenue=Decimal("100"))}
+    metrics.annual_metrics = FinancialMetrics(revenue=Decimal("400"))
+    mock_processing_service.calculate_quarterly_performance.return_value = metrics
+
+    service.collect_and_save(company_names, 2025, 2025, "test.xlsx")
+
+    saved_df = mock_repository_port.save_partition.call_args[0][2]
+    annual_row = saved_df[saved_df["구분"] == "연간"].iloc[0]
+    quarter_row = saved_df[saved_df["분기"] == "2Q"].iloc[0]  # fiscal 4Q -> calendar 2Q
+
+    # fiscal_year=2025, settlement_month=6 -> FY 종료(2026.6) 캘린더 연도 = 2026
+    assert annual_row["연도"] == 2026
+    assert annual_row["연도"] == quarter_row["연도"]
+
+
 def test_detail_type_reflects_actual_fs_type_when_only_separate_filed(
     service,
     mock_corp_code_port,

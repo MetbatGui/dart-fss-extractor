@@ -412,13 +412,22 @@ class FinancialCollectionService:
 
         # 2. 연간 데이터 추가
         # QuarterlyMetrics.annual_metrics가 있으면 이를 사용하고, 없으면 분기 합산으로 처리.
+        # 연간 실적의 "연도"는 결산월 기준 회계연도 종료 시점의 캘린더 연도로 맞춘다
+        # (4Q와 동일한 연도를 부여해, 분기 라벨과 어긋나지 않도록 함).
+        try:
+            annual_calendar_year, _ = Company(
+                code="", name=name, settlement_month=settlement_month
+            ).to_calendar_period(year, "4Q")
+        except Exception as e:
+            logger.error(f"[{name}] 연간 캘린더 연도 보정 계산 중 오류: {e}")
+            annual_calendar_year = year
 
         if metrics.annual_metrics and metrics.annual_metrics.is_valid:
             # 원본 연간 데이터 사용
             data_list.append(
                 {
                     "기업명": name,
-                    "연도": year,
+                    "연도": annual_calendar_year,
                     "구분": "연간",
                     "분기": "연간",
                     "구분_상세": detail_type,
@@ -441,7 +450,7 @@ class FinancialCollectionService:
                 data_list.append(
                     {
                         "기업명": name,
-                        "연도": year,
+                        "연도": annual_calendar_year,
                         "구분": "연간",
                         "분기": "연간",  # Pivot시 사용 안함
                         "구분_상세": detail_type,
