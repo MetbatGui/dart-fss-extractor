@@ -222,6 +222,39 @@ def test_collect_and_save_marks_failure_when_all_metrics_are_empty(
     assert 2023 in saved_company.failed_years
 
 
+def test_detail_type_reflects_actual_fs_type_when_only_separate_filed(
+    service,
+    mock_corp_code_port,
+    mock_financial_port,
+    mock_processing_service,
+    mock_repository_port,
+    mock_export_port,
+):
+    """연결재무제표를 전혀 제출하지 않은 기업(개별만 존재)은 '구분_상세'가
+    '개별'로 정확히 기록되어야 한다 (과거엔 무조건 '연결'로 하드코딩되던 버그).
+    """
+    company_names = ["OfsOnlyCorp"]
+    mock_corp_code_port.get_codes.return_value = ["55555555"]
+    mock_repository_port.exists.return_value = False
+    mock_repository_port.load_company_metadata.return_value = None
+    mock_financial_port.get_settlement_month.return_value = 12
+    mock_repository_port.load_all.return_value = pd.DataFrame()
+
+    # 이 기업은 연결재무제표가 전혀 없고 개별만 존재
+    mock_financial_port.get_all_statements.return_value = {
+        FinancialStatementType.SEPARATE: Mock(spec=FinancialStatement)
+    }
+
+    metrics = QuarterlyMetrics(corp_name="OfsOnlyCorp")
+    metrics.metrics_by_quarter = {"1Q": FinancialMetrics(revenue=Decimal("1000"))}
+    mock_processing_service.calculate_quarterly_performance.return_value = metrics
+
+    service.collect_and_save(company_names, 2023, 2023, "test.xlsx")
+
+    saved_df = mock_repository_port.save_partition.call_args[0][2]
+    assert (saved_df["구분_상세"] == "개별").all()
+
+
 def test_append_to_list_sets_detail_type_for_merge_compatibility(
     service,
     mock_corp_code_port,
