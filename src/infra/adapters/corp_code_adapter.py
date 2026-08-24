@@ -154,18 +154,29 @@ class CorpCodeAdapter(CorpCodePort):
 
         tree = ET.parse(self._XML_PATH)
         root = tree.getroot()
-        mapping = {}
+        mapping: dict[str, str] = {}
+        listed_names: set[str] = set()
         for corp in root.findall("./list"):
             name = corp.findtext("corp_name")
             code = corp.findtext("corp_code")
             stock_code = corp.findtext("stock_code")
 
-            if name and code:
-                if only_listed:
-                    if stock_code and stock_code.strip():
-                        mapping[name] = code
-                else:
+            if not (name and code):
+                continue
+
+            if only_listed:
+                if stock_code and stock_code.strip():
                     mapping[name] = code
+                continue
+
+            # 동명이인(같은 이름의 비상장 기타법인과 상장사)이 있을 경우,
+            # 상장사(stock_code 보유)를 우선한다. 한 번 상장사로 확정된 이름은
+            # 이후 비상장 동명이인이 나와도 덮어쓰지 않는다.
+            is_listed = bool(stock_code and stock_code.strip())
+            if name not in mapping or (is_listed and name not in listed_names):
+                mapping[name] = code
+                if is_listed:
+                    listed_names.add(name)
         return mapping
 
     def get_code(self, company_name: str) -> str | None:
