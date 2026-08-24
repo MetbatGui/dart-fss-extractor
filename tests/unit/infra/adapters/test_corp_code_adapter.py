@@ -184,6 +184,52 @@ def test_smart_cache_invalidation() -> None:
     shutil.rmtree(temp_root)
 
 
+def test_name_collision_prefers_listed_company(monkeypatch) -> None:
+    """동명이인(같은 이름의 비상장 기타법인 + 상장사)이 있을 때, XML 등장 순서와
+    무관하게 상장사(stock_code 보유)가 우선 선택되어야 한다.
+
+    과거엔 XML에서 나중에 나오는 쪽이 무조건 덮어써서, 비상장 동명이인이
+    실제 상장사 매핑을 가리는 데이터 오염(예: 태광, 대웅) 버그가 있었음.
+    (data/corps.csv가 있으면 그쪽이 우선 로드되어 XML 경로를 안 타므로,
+    실제 저장소의 corps.csv를 우회하기 위해 임시 디렉터리로 cwd를 옮긴다.)
+    """
+    import shutil
+    import tempfile
+    import zipfile
+    import io
+    from unittest.mock import patch, MagicMock
+
+    original_cwd = Path.cwd()
+    temp_root = Path(tempfile.mkdtemp())
+    monkeypatch.chdir(temp_root)
+
+    # 비상장 동명이인이 상장사보다 XML에서 먼저 나오는 케이스
+    dummy_xml = (
+        b"<result>"
+        b"<list><corp_code>99999999</corp_code><corp_name>\xed\x83\x9c\xea\xb4\x91</corp_name>"
+        b"<stock_code></stock_code><modify_date>20230101</modify_date></list>"
+        b"<list><corp_code>00153375</corp_code><corp_name>\xed\x83\x9c\xea\xb4\x91</corp_name>"
+        b"<stock_code>023160</stock_code><modify_date>20230101</modify_date></list>"
+        b"</result>"
+        + b"<!-- " + b"x" * 2000 + b" -->"
+    )
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_STORED) as zf:
+        zf.writestr("CORPCODE.xml", dummy_xml)
+
+    mock_response = MagicMock()
+    mock_response.content = zip_buffer.getvalue()
+    mock_response.raise_for_status.return_value = None
+
+    with patch.dict(os.environ, {"OUTPUT_DIRECTORY": str(temp_root), "DART_API_KEY": "dummy_key"}), \
+         patch("requests.get", return_value=mock_response):
+        adapter = CorpCodeAdapter(force_download=True)
+        assert adapter.get_code("태광") == "00153375"
+
+    monkeypatch.chdir(original_cwd)
+    shutil.rmtree(temp_root)
+
+
 def test_cache_expires_after_max_age_days() -> None:
     """캐시 파일이 max_age_days보다 오래되면 자동 재다운로드되는지 확인 (freezegun으로 시간 경과 시뮬레이션)."""
     import shutil
