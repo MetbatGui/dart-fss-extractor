@@ -198,6 +198,81 @@ def test_collect_daily_disclosures_with_local_xbrl_path(service, mock_ports):
         repo_port.save_partition.assert_called()
 
 
+def test_settlement_month_lookup_failure_skips_disclosure_instead_of_defaulting(
+    service, mock_ports
+):
+    """신규 기업의 결산월 조회가 실패하면 12월로 잘못 고정하지 말고 이번 공시를
+    건너뛰어야 한다 (다음 실행에서 재시도되도록). 과거엔 실패 시 무조건 12로
+    기본값 처리 후 영구 저장했음.
+    """
+    cc_port, fin_port, repo_port, cache_port, down_port, parser_port = mock_ports
+
+    disclosures = [{
+        "corp_code": "001",
+        "corp_name": "A사",
+        "report_nm": "분기보고서 (2026.03)",
+        "rcept_no": "202605290001",
+        "rm": "",
+    }]
+    fin_port.get_disclosures.return_value = disclosures
+    fin_port.get_settlement_month.side_effect = Exception("connection reset")
+
+    result = service.collect_daily_disclosures(
+        target_company_names=["A사"], start_date="20260529", end_date="20260529"
+    )
+
+    assert result["failed"] == ["001"]
+    repo_port.save_company_metadata.assert_not_called()
+    repo_port.save_partition.assert_not_called()
+
+
+def test_annual_row_year_matches_non_december_settlement(service, mock_ports):
+    """비12월 결산 기업의 사업보고서(연간) 행 '연도'는 4Q와 마찬가지로 결산월
+    기준 회계연도 종료 시점의 캘린더 연도로 보정되어야 한다."""
+    cc_port, fin_port, repo_port, cache_port, down_port, parser_port = mock_ports
+
+    disclosures = [{
+        "corp_code": "001",
+        "corp_name": "A사",
+        "report_nm": "사업보고서 (2026.06)",
+        "rcept_no": "202609290001",
+        "rm": "",
+    }]
+    fin_port.get_disclosures.return_value = disclosures
+    fin_port.get_settlement_month.return_value = 6  # 6월 결산
+
+    stmt = FinancialStatement(
+        corp_code="001",
+        corp_name="A사",
+        bsns_year=2025,
+        reprt_type=ReportType.ANNUAL,
+        fs_type=FinancialStatementType.CONSOLIDATED,
+        accounts=[
+            AccountItem("매출액", "5000"),
+            AccountItem("영업이익", "500"),
+            AccountItem("당기순이익", "400"),
+        ],
+    )
+    parser_port.parse_xbrl_zip.return_value = {FinancialStatementType.CONSOLIDATED: stmt}
+    down_port.download_xbrl_zip.return_value = b"mock_zip_bytes"
+
+    with patch("pathlib.Path.exists") as mock_exists, \
+         patch("pathlib.Path.read_bytes"), \
+         patch("pathlib.Path.write_bytes"), \
+         patch("pathlib.Path.mkdir"):
+        mock_exists.return_value = False
+
+        result = service.collect_daily_disclosures(
+            target_company_names=["A사"], start_date="20260929", end_date="20260929"
+        )
+
+    assert result["success"] == ["001"]
+    saved_df = repo_port.save_partition.call_args.args[2]
+    annual_row = saved_df[saved_df["구분"] == "연간"].iloc[0]
+    # 6월 결산, fiscal_year=2025(회기 시작연도) -> FY 종료(2026.6) 캘린더 연도 = 2026
+    assert annual_row["연도"] == 2026
+
+
 def test_sync_ticker_name_caches_new_ticker(service):
     """처음 보는 corp_code는 조용히 캐시에 저장되고 dirty 플래그가 켜진다."""
     service._ticker_name_port = MagicMock()

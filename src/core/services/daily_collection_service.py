@@ -145,7 +145,14 @@ class DailyCollectionService:
             )
 
             # 기업 정보 조회해서 결산월 얻어오기
-            company = self._get_or_create_company(corp_code, corp_name)
+            try:
+                company = self._get_or_create_company(corp_code, corp_name)
+            except Exception as e:
+                logger.error(
+                    f"  ❌ [{corp_name}] 신규 기업 결산월 조회 실패, 이번 공시는 건너뜁니다: {e}"
+                )
+                failed_codes.append(corp_code)
+                continue
             settlement_month = company.settlement_month
 
             # 3-2. 공시에 실린 종목코드(ticker) 기준 최신 종목명 캐시 동기화 (충돌 감지)
@@ -409,11 +416,13 @@ class DailyCollectionService:
                     )
 
                     # 연간 데이터 구성 (사업보고서인 경우 추가 적재)
+                    # "연도"는 4Q와 동일하게 결산월 기준 회계연도 종료 시점의
+                    # 캘린더 연도로 맞춘다 (분기 행과 어긋나지 않도록).
                     if rep_type == ReportType.ANNUAL:
                         quarter_rows.append(
                             {
                                 "기업명": corp_name,
-                                "연도": year,
+                                "연도": c_year,
                                 "구분": "연간",
                                 "분기": "연간",
                                 "구분_상세": "연결"
@@ -462,14 +471,15 @@ class DailyCollectionService:
             return False
 
     def _get_or_create_company(self, corp_code: str, corp_name: str) -> Company:
-        """기업 메타데이터를 조회하고, 없으면 결산월을 조회해 신규 생성 후 저장합니다."""
+        """기업 메타데이터를 조회하고, 없으면 결산월을 조회해 신규 생성 후 저장합니다.
+
+        결산월은 최초 1회만 조회되어 영구 저장되므로, 조회 실패 시(어댑터의
+        재시도로도 끝내 실패) 12(기본값)로 잘못 고정하지 않고 예외를 그대로
+        전파한다. 호출부가 이번 공시를 건너뛰고 다음 실행에서 재시도하게 한다.
+        """
         company = self._repository_port.load_company_metadata(corp_code)
         if not company:
-            try:
-                settlement_month = self._financial_port.get_settlement_month(corp_code)
-            except Exception as e:
-                logger.error(f"신규 기업 {corp_name} 결산월 조회 실패: {e}")
-                settlement_month = 12
+            settlement_month = self._financial_port.get_settlement_month(corp_code)
             company = Company(
                 code=corp_code, name=corp_name, settlement_month=settlement_month
             )
