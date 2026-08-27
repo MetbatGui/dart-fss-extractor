@@ -11,6 +11,12 @@ from core.services.data_processing_service import DataProcessingService
 
 logger = logging.getLogger(__name__)
 
+# 엑셀 내보내기에서 항상 제외할 기업 (DB 수집/저장은 그대로 유지, 최종 산출물에서만 뺀다).
+# 각 항목은 (종목코드, 사유)로 남겨 나중에 사유를 잊지 않도록 한다.
+EXPORT_BLACKLIST: dict[str, str] = {
+    "00120872": "만호제강 - 결산월 불확실(공시 이력과 결산월 프로필 불일치) + 회계처리기준위반 이력으로 캘린더 분기 라벨 신뢰 불가",
+}
+
 
 class FinancialDataExportService:
     """연결/개별 재무 데이터를 병합하고 피벗/가공하여 최종 엑셀을 생성하는 조율 서비스."""
@@ -119,6 +125,16 @@ class FinancialDataExportService:
             logger.info(
                 f"연도 범위 필터 적용: {year_min or '전체'} ~ {year_max or '전체'} (남은 행: {len(df_base)}개)"
             )
+
+        # 2-4. 블랙리스트 기업 제외 (DB 수집은 유지, 최종 엑셀에서만 제외)
+        if EXPORT_BLACKLIST:
+            blacklisted_mask = df_base["종목코드"].isin(EXPORT_BLACKLIST.keys())
+            if blacklisted_mask.any():
+                for code in df_base.loc[blacklisted_mask, "종목코드"].unique():
+                    logger.warning(
+                        f"[EXPORT BLACKLIST] 엑셀 제외: {code} - {EXPORT_BLACKLIST.get(code, '사유 미기재')}"
+                    )
+                df_base = df_base[~blacklisted_mask]
 
         # 3. 비정상 캐시 오염 기업 필터 가드
         df_temp = df_base.copy()
