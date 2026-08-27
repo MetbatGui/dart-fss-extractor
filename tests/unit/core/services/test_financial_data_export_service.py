@@ -4,7 +4,10 @@ import pandas as pd
 import pytest
 
 from core.services.data_processing_service import DataProcessingService
-from core.services.financial_data_export_service import FinancialDataExportService
+from core.services.financial_data_export_service import (
+    EXPORT_BLACKLIST,
+    FinancialDataExportService,
+)
 
 
 class _FakeRepo:
@@ -118,3 +121,47 @@ def test_year_range_filter_excludes_out_of_range_rows():
     rev_sheet = exporter.exported["매출액_연간"]
     assert 2014 not in rev_sheet.columns
     assert 2020 in rev_sheet.columns
+
+
+def test_blacklisted_company_excluded_from_export_but_not_from_db():
+    """EXPORT_BLACKLIST에 있는 종목코드는 최종 엑셀에서 제외되어야 한다
+    (DB/저장소 데이터 자체는 이 서비스가 건드리지 않으므로 그대로 유지됨)."""
+    assert EXPORT_BLACKLIST, "테스트 시점에 블랙리스트가 비어있으면 안 됨"
+    blacklisted_code = next(iter(EXPORT_BLACKLIST))
+
+    cfs_df = pd.DataFrame(
+        [
+            {
+                "종목코드": blacklisted_code,
+                "기업명": "블랙리스트기업",
+                "연도": 2026,
+                "구분": "분기",
+                "분기": "3Q",
+                "매출액": 999.0,
+                "영업이익": 99.0,
+                "당기순이익": 9.0,
+                "rcept_no": None,
+            },
+            {
+                "종목코드": "000001",
+                "기업명": "정상기업",
+                "연도": 2026,
+                "구분": "분기",
+                "분기": "1Q",
+                "매출액": 1000.0,
+                "영업이익": 100.0,
+                "당기순이익": 50.0,
+                "rcept_no": "R001",
+            },
+        ]
+    )
+    repo = _FakeRepo({"financial_data_cfs": cfs_df})
+    exporter = _FakeExporter()
+    svc = FinancialDataExportService(repo, exporter, DataProcessingService())
+
+    ok = svc.export_integrated_financial_data("dummy.xlsx")
+
+    assert ok
+    rev_sheet = exporter.exported["매출액_분기"]
+    assert "블랙리스트기업" not in rev_sheet.index.get_level_values("기업명")
+    assert "정상기업" in rev_sheet.index.get_level_values("기업명")
