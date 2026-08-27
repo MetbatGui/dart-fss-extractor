@@ -1,5 +1,6 @@
 """통합 재무 데이터 엑셀 내보내기 비즈니스 서비스."""
 
+import csv
 import logging
 from pathlib import Path
 
@@ -11,11 +12,26 @@ from core.services.data_processing_service import DataProcessingService
 
 logger = logging.getLogger(__name__)
 
-# 엑셀 내보내기에서 항상 제외할 기업 (DB 수집/저장은 그대로 유지, 최종 산출물에서만 뺀다).
-# 각 항목은 (종목코드, 사유)로 남겨 나중에 사유를 잊지 않도록 한다.
-EXPORT_BLACKLIST: dict[str, str] = {
-    "00120872": "만호제강 - 결산월 불확실(공시 이력과 결산월 프로필 불일치) + 회계처리기준위반 이력으로 캘린더 분기 라벨 신뢰 불가",
-}
+EXPORT_BLACKLIST_PATH = Path("data/export_blacklist.csv")
+
+
+def _load_export_blacklist(path: Path = EXPORT_BLACKLIST_PATH) -> dict[str, str]:
+    """엑셀 내보내기에서 항상 제외할 기업 목록을 CSV에서 읽어온다.
+
+    DB 수집/저장은 그대로 유지하고, 최종 산출물에서만 뺀다. (종목코드,기업명,사유) 컬럼.
+    파일이 없으면 빈 딕셔너리를 반환한다 (블랙리스트 없음).
+    """
+    if not path.is_file():
+        return {}
+    with path.open(encoding="utf-8-sig") as f:
+        return {
+            row["종목코드"].strip(): f"{row['기업명'].strip()} - {row['사유'].strip()}"
+            for row in csv.DictReader(f)
+            if row.get("종목코드", "").strip()
+        }
+
+
+EXPORT_BLACKLIST: dict[str, str] = _load_export_blacklist()
 
 
 class FinancialDataExportService:
