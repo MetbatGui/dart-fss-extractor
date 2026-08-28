@@ -15,10 +15,10 @@ from pathlib import Path
 import pandas as pd
 from dotenv import load_dotenv
 
+from core.services.config_sync import download_config_files
 from core.services.daily_collection_service import DailyCollectionService
 from core.services.daily_routine_service import DailyRoutineService
 from core.services.data_processing_service import DataProcessingService
-from core.services.financial_data_export_service import FinancialDataExportService
 from infra.adapters.corp_code_adapter import CorpCodeAdapter
 from infra.adapters.dart_financial_adapter import DartFinancialAdapter
 from infra.adapters.dart_xbrl_financial_adapter import DartXbrlFinancialAdapter
@@ -38,8 +38,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger("DailyScheduler")
 
-DB_REMOTE_PATH = "financial_statements.db"
+DB_REMOTE_PATH = "db/financial_statements.db"
 ARTIFACT_REMOTE_PATH = "재무제표.xlsx"
+# 사람이 가끔 수정하는 설정 파일: 매 실행마다 읽기 전용으로 동기화한다 (A안).
+# {원격 경로: 로컬 경로}
+CONFIG_REMOTE_TO_LOCAL = {
+    "db/target_companies.csv": "data/target_companies.csv",
+    "db/corps.csv": "data/corps.csv",
+    "db/export_blacklist.csv": "data/export_blacklist.csv",
+}
 
 
 def parse_arguments():
@@ -129,12 +136,6 @@ def main():
 
     logger.info(f"🚀 데일리 수집 구동 시작 (스캔 범위: {bgn_de} ~ {end_de})")
 
-    company_names = load_target_companies(Path(args.companies))
-    if not company_names:
-        logger.error("수집할 대상 기업이 없습니다. 스케줄러를 종료합니다.")
-        sys.exit(1)
-    logger.info(f"로드된 수집 대상 기업: {len(company_names)}개")
-
     client_secret_path = "secrets/client_secret.json"
     storage_port = GoogleDriveAdapter(
         token_file=token_path,
@@ -143,6 +144,21 @@ def main():
         if os.path.exists(client_secret_path)
         else None,
     )
+
+    # 설정 파일(target_companies.csv 등)은 로컬과 무관하게 항상 Drive의 db/ 폴더
+    # 내용을 기준으로 동작해야 하므로, 대상 기업 목록을 읽기 전에 먼저 동기화한다.
+    sync_results = download_config_files(storage_port, CONFIG_REMOTE_TO_LOCAL)
+    for remote_path, ok in sync_results.items():
+        if not ok:
+            logger.warning(
+                f"⚠️ 설정 파일을 Drive에서 받지 못했습니다(로컬 사본 유지 시도): {remote_path}"
+            )
+
+    company_names = load_target_companies(Path(args.companies))
+    if not company_names:
+        logger.error("수집할 대상 기업이 없습니다. 스케줄러를 종료합니다.")
+        sys.exit(1)
+    logger.info(f"로드된 수집 대상 기업: {len(company_names)}개")
 
     corp_code_adapter = CorpCodeAdapter()
     api_financial_adapter = DartFinancialAdapter(api_key=api_key, use_cache=True)
@@ -162,6 +178,12 @@ def main():
         )
 
     def export_service_factory(repo):
+        # 지연 임포트: export_blacklist.csv를 config 동기화로 받은 *뒤에* 이 모듈이
+        # 최초 임포트되어야 EXPORT_BLACKLIST가 최신 원격 내용을 반영한다.
+        from core.services.financial_data_export_service import (
+            FinancialDataExportService,
+        )
+
         return FinancialDataExportService(
             repository_port=repo,
             export_port=ExcelExportAdapter(),
