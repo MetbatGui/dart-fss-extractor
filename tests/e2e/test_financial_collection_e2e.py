@@ -8,7 +8,7 @@ from core.services.financial_collection_service import FinancialCollectionServic
 from core.services.data_processing_service import DataProcessingService
 from infra.adapters.dart_financial_adapter import DartFinancialAdapter
 from infra.adapters.corp_code_adapter import CorpCodeAdapter
-from infra.adapters.parquet_repository_adapter import ParquetRepositoryAdapter
+from infra.adapters.sqlite.sqlite_repository_adapter import SqliteRepositoryAdapter
 from infra.adapters.excel_export_adapter import ExcelExportAdapter
 
 import sys
@@ -51,7 +51,7 @@ def setup_services():
 
     # E2E 테스트용 저장소 설정 (테스트 후 정리 필요하지만, pytest tmp_path 등 활용 권장)
     # 여기서는 그냥 기본 경로 사용
-    repository_adapter = ParquetRepositoryAdapter(base_dir="test_data/repo_e2e")
+    repository_adapter = SqliteRepositoryAdapter(db_path="test_data/repo_e2e/e2e.db")
     export_adapter = ExcelExportAdapter()
     
     # DataProcessingService는 기본 설정 파일(config/account_keywords.toml) 사용

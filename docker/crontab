@@ -1,0 +1,5 @@
+# 평일 16:00 KST: 당일 정기공시를 스캔해 대상 기업만 증분 수집한다(daily_scheduler.py).
+# 시간은 운영 편의에 맞게 조정 가능 — DART 공시는 하루 여러 번 올라오므로 시각 자체는
+# 크리티컬하지 않다. cron 자체는 /proc/1/fd/1(컨테이너 stdout) 리다이렉션 권한 때문에
+# root로 기동한다(docker_guide.md §3).
+0 16 * * 1-5 root /app/docker/run-daily.sh >> /proc/1/fd/1 2>&1

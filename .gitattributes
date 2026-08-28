@@ -1,0 +1,5 @@
+# docker_guide.md §2: core.autocrlf가 켜져 있으면 체크아웃 시 CRLF로 변환되어
+# 리눅스 컨테이너 안에서 셸 스크립트 shebang이 깨진다(bad interpreter). 항상 LF 강제.
+docker/*.sh text eol=lf
+docker/crontab text eol=lf
+Dockerfile text eol=lf
