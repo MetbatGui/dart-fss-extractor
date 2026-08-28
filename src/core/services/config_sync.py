@@ -12,6 +12,15 @@ from core.ports.storage_port import StoragePort
 
 logger = logging.getLogger(__name__)
 
+# Drive SSOT 공통 경로 (daily_scheduler.py / main.py가 함께 참조).
+DB_REMOTE_PATH = "db/financial_statements.db"
+ARTIFACT_REMOTE_PATH = "재무제표.xlsx"
+CONFIG_REMOTE_TO_LOCAL = {
+    "db/target_companies.csv": "data/target_companies.csv",
+    "db/corps.csv": "data/corps.csv",
+    "db/export_blacklist.csv": "data/export_blacklist.csv",
+}
+
 
 def download_config_files(
     storage_port: StoragePort, remote_to_local: dict[str, str]
