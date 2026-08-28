@@ -15,7 +15,12 @@ from pathlib import Path
 import pandas as pd
 from dotenv import load_dotenv
 
-from core.services.config_sync import download_config_files
+from core.services.config_sync import (
+    ARTIFACT_REMOTE_PATH,
+    CONFIG_REMOTE_TO_LOCAL,
+    DB_REMOTE_PATH,
+    download_config_files,
+)
 from core.services.daily_collection_service import DailyCollectionService
 from core.services.daily_routine_service import DailyRoutineService
 from core.services.data_processing_service import DataProcessingService
@@ -37,16 +42,6 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("DailyScheduler")
-
-DB_REMOTE_PATH = "db/financial_statements.db"
-ARTIFACT_REMOTE_PATH = "재무제표.xlsx"
-# 사람이 가끔 수정하는 설정 파일: 매 실행마다 읽기 전용으로 동기화한다 (A안).
-# {원격 경로: 로컬 경로}
-CONFIG_REMOTE_TO_LOCAL = {
-    "db/target_companies.csv": "data/target_companies.csv",
-    "db/corps.csv": "data/corps.csv",
-    "db/export_blacklist.csv": "data/export_blacklist.csv",
-}
 
 
 def parse_arguments():
