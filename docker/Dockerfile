@@ -27,6 +27,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && chown -R nonroot:nonroot /app
 
 COPY docker/crontab /etc/cron.d/dart-fss-extractor
+RUN chmod 0644 /etc/cron.d/dart-fss-extractor
 
 ENTRYPOINT []
 USER nonroot

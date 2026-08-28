@@ -107,7 +107,7 @@ def main():
     api_key = os.getenv("DART_API_KEY")
     if not api_key:
         logger.error("DART_API_KEY 환경 변수가 설정되지 않았습니다.")
-        return
+        sys.exit(1)
 
     drive_folder_id = os.getenv("GOOGLE_DRIVE_FINANCIAL_STATEMENTS_ID")
     if not drive_folder_id:
@@ -115,12 +115,12 @@ def main():
             "GOOGLE_DRIVE_FINANCIAL_STATEMENTS_ID 환경 변수가 설정되지 않았습니다. "
             "DB SSOT가 Drive이므로 이 값 없이는 실행할 수 없습니다."
         )
-        return
+        sys.exit(1)
 
     token_path = "secrets/token.json"
     if not os.path.exists(token_path):
         logger.error(f"구글 드라이브 토큰 파일이 존재하지 않습니다: {token_path}")
-        return
+        sys.exit(1)
 
     # 인자 파싱
     parser = argparse.ArgumentParser(description="DART 재무 데이터 수집기")
@@ -176,7 +176,7 @@ def main():
     company_names = load_company_names(Path(args.companies))
     if not company_names:
         logger.error("수집할 대상 기업이 없습니다.")
-        return
+        sys.exit(1)
 
     # 계정과목 키워드 설정 파일 직접 로드 (DI 적용)
     config_path = Path("config/account_keywords.toml")
@@ -213,6 +213,7 @@ def main():
         f"데이터 수집 시작: {len(company_names)}개 기업, {args.start_year}~{args.end_year}년"
     )
 
+    fatal_error = False
     try:
         service.collect_and_save(
             company_names=company_names,
@@ -225,6 +226,7 @@ def main():
         logger.info("모든 작업이 완료되었습니다.")
     except Exception as e:
         logger.exception(f"작업 중 치명적인 오류 발생: {e}")
+        fatal_error = True
     finally:
         repository_adapter.close()
         db_uploaded = db_session.upload()
@@ -233,6 +235,11 @@ def main():
             logger.info("DB SSOT(Drive) 업로드 완료.")
         else:
             logger.error("DB SSOT(Drive) 업로드 실패 — 이번 실행분이 Drive에 반영되지 않았습니다.")
+
+    # cron 등이 exit code로 성공/실패를 판단하므로(docker_guide.md §10),
+    # 치명적 오류나 DB 업로드 실패를 조용히 exit 0으로 끝내지 않는다.
+    if fatal_error or not db_uploaded:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
