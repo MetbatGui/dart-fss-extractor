@@ -33,9 +33,10 @@ def test_download_writes_remote_bytes_to_local_temp_file(mock_storage):
 
 
 def test_download_creates_empty_local_file_when_remote_missing(mock_storage):
-    """원격에 DB가 아직 없으면(최초 설치), 빈 로컬 파일로 시작해야 한다
+    """원격에 DB가 정말 없으면(최초 설치), 빈 로컬 파일로 시작해야 한다
     (SqliteRepositoryAdapter가 열면서 스키마를 새로 초기화할 수 있도록)."""
     mock_storage.get_file.return_value = None
+    mock_storage.path_exists.return_value = False
     session = DbSyncSession(mock_storage, remote_path="financial_data.db")
 
     local_path = session.download()
@@ -44,6 +45,22 @@ def test_download_creates_empty_local_file_when_remote_missing(mock_storage):
     assert local_path.read_bytes() == b""
 
     session.cleanup()
+
+
+def test_download_raises_when_remote_exists_but_download_fails(mock_storage):
+    """원격에 DB가 존재하는데 get_file이 실패(None)했다면 '최초 설치'가 아니라
+    다운로드 오류다. 이걸 빈 DB로 취급해 진행하면 나중에 그 빈 DB로 실제
+    원격 SSOT를 덮어써버리는 데이터 유실 사고로 이어지므로, 조용히 넘어가지
+    말고 예외를 내서 실행 자체를 중단시켜야 한다."""
+    mock_storage.get_file.return_value = None
+    mock_storage.path_exists.return_value = True
+    session = DbSyncSession(mock_storage, remote_path="financial_data.db")
+
+    with pytest.raises(RuntimeError):
+        session.download()
+
+    # download() 실패 후에는 세션이 미다운로드 상태여야 하므로 upload()도 막혀야 한다.
+    assert session.upload() is False
 
 
 def test_upload_sends_local_file_bytes_to_storage_port(mock_storage):

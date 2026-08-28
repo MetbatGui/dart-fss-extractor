@@ -33,6 +33,12 @@ class DbSyncSession:
 
         원격에 아직 DB가 없으면(최초 설치) 빈 파일로 시작한다 — SqliteRepositoryAdapter가
         이를 열면서 스키마를 새로 초기화하고, 첫 성공 업로드가 그 DB를 원격 원본으로 만든다.
+
+        get_file()은 "파일이 아예 없음"과 "네트워크/인증 등으로 다운로드 실패"를
+        둘 다 None으로 반환하므로 구분할 수 없다. 이를 무조건 최초 설치로 해석하면
+        원격에 실제로 존재하는 DB를 빈 DB로 착각해 작업 후 그대로 덮어써버리는
+        데이터 유실 사고가 난다. path_exists()로 실제 존재 여부를 다시 확인해
+        "존재하는데 못 받음"인 경우는 예외를 내서 실행을 중단시킨다.
         """
         fd, tmp_path_str = tempfile.mkstemp(suffix=".db")
         os.close(fd)
@@ -41,6 +47,12 @@ class DbSyncSession:
         data = self._storage_port.get_file(self._remote_path)
         if data:
             local_path.write_bytes(data)
+        elif self._storage_port.path_exists(self._remote_path):
+            local_path.unlink()
+            raise RuntimeError(
+                f"원격에 DB가 존재하지만 다운로드에 실패했습니다: {self._remote_path} "
+                "(빈 DB로 진행하면 원격 SSOT를 덮어쓸 위험이 있어 중단합니다)"
+            )
         else:
             logger.info(
                 f"원격에 DB가 없어(최초 설치로 추정) 빈 작업 사본으로 시작합니다: {self._remote_path}"
