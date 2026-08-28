@@ -162,6 +162,9 @@ def main():
     ticker_name_port = NaverTickerNameAdapter()
 
     def collection_service_factory(repo):
+        # repo와 동일한(Drive에서 받은 임시 작업 사본) DB 파일을 공유해야 티커명
+        # 캐시도 SSOT 업로드에 함께 반영된다. 기본 경로(data/financial_data.db)로
+        # 두면 SSOT 전환 전 남아있던 로컬 파일에 고립되어 저장된다.
         return DailyCollectionService(
             corp_code_port=corp_code_adapter,
             financial_port=api_financial_adapter,
@@ -169,7 +172,7 @@ def main():
             processing_service=processing_service,
             xbrl_collector_port=xbrl_financial_adapter,
             ticker_name_port=ticker_name_port,
-            ticker_cache_port=SqliteTickerNameCacheAdapter(),
+            ticker_cache_port=SqliteTickerNameCacheAdapter(db_path=repo.db_path),
         )
 
     def export_service_factory(repo):
