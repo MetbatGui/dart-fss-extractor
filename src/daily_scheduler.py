@@ -212,6 +212,10 @@ def main():
     if result.error:
         logger.warning(f"⚠️ 수집 단계 예외: {result.error}")
 
+    if not result.artifact_uploaded:
+        logger.error("❌ 산출물(엑셀) 업로드가 실패했습니다 — 다음 실행 전에 재시도 필요.")
+        sys.exit(1)
+
     if not result.db_uploaded:
         logger.error("❌ DB SSOT 업로드가 실패했습니다 — 이번 실행분이 Drive에 반영되지 않았습니다.")
         sys.exit(1)
